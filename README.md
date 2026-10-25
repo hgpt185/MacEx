@@ -1,6 +1,6 @@
 # MacEx
 
-A standalone native macOS file manager. Version **0.2.1** carries P1 and the P2 local daily-use features. MacEx coexists with Finder; it does not replace the desktop or system file dialogs. Public-release verification remains incomplete.
+A standalone native macOS file manager. Version **0.3.0** carries P1, P2, and conventional folder search. MacEx coexists with Finder; it does not replace the desktop or system file dialogs. Public-release verification remains incomplete.
 
 ## Build and run
 
@@ -65,6 +65,10 @@ Testing can isolate workspace persistence by adding `--state-directory /absolute
 - Open Folder controls have been removed from the sidebar, File menu, and unavailable-folder screen. Navigate using the sidebar, breadcrumbs, opening a folder, or **Go → Go to Folder…** (`⇧⌘G`). The Open With application chooser remains a system panel.
 - A first-launch File Access guide explains that macOS cannot grant access at install. Full Disk Access is the one switch for Desktop, Documents, Downloads, and other protected locations. The guide can also raise those three system prompts in one sitting. Reopen it through **MacEx → File Access…**. It never grants permissions itself or claims to detect Full Disk Access. The Settings link is a best-effort macOS URL with a System Settings fallback and manual instructions.
 
+## Search
+
+View → Search in This Folder… (`⌥⌘F`) searches the folder that is open. Spotlight runs first and is limited to that folder. The result banner says whether Spotlight had indexed items in the folder. An empty Spotlight result is not treated as “nothing matches.” Scan This Folder then checks names, extensions, kind, size, created and modified dates, and text up to 1 MiB per file. Symbolic links are not followed. Saved searches can be pinned in the sidebar. Show in Enclosing Folder returns to the file’s parent.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -89,6 +93,7 @@ Testing can isolate workspace persistence by adding `--state-directory /absolute
 | `⌘⌫` | Move to Trash after confirmation |
 | `⇧⌘.` | Toggle hidden files |
 | `⌘F` | Focus filename filter |
+| `⌥⌘F` | Search this folder |
 | `⌘R` | Refresh |
 
 Text fields keep standard Copy/Paste behavior. Use View → Appearance to follow the system or select light/dark within MacEx.
@@ -113,7 +118,7 @@ File coordination does not freeze uncooperative writers. A changing filesystem c
 - A process crash or forced termination can leave staging directories. There is no automatic recovery or automatic deletion of abandoned staging data. Review such paths manually.
 - Directory events refresh membership. Some in-place child-file edits may require `⌘R` to refresh metadata until richer event tracking is added.
 - File promises (for example, dragging a not-yet-downloaded attachment from another app) are not supported; drag actual files instead. Sidebar drag targets reorder shortcuts rather than transfer files.
-- No file-operation Undo, saved searches, recursive/content search, OCR, SFTP, or cleanup dashboard yet. These remain in [ROADMAP.md](ROADMAP.md).
+- No file-operation Undo, OCR, SFTP, or cleanup dashboard yet. Saved searches and folder search are in P3. The rest remain in [ROADMAP.md](ROADMAP.md).
 
 MacEx runs without App Sandbox in this preview, under your normal macOS account permissions. It does not elevate privileges or bypass SIP, ACLs, or privacy settings. Desktop/Documents/Downloads and volume privacy prompts occur only when those locations are accessed. Full Disk Access is not required for ordinary use. Users can optionally grant it in System Settings → Privacy & Security → Full Disk Access to cover the Files and Folders privacy checks with a broader grant. Installation cannot grant this automatically. Permission choices are managed by macOS; Developer ID releases need a stable signing identity so updates can be recognized as the same app. Ad-hoc development rebuilds can cause repeat prompts. Full Disk Access does not bypass other protections or App Sandbox restrictions. Hidden-file and appearance preferences use `UserDefaults`; the app does not persist file contents or credentials.
 

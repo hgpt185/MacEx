@@ -12,6 +12,7 @@ struct BrowserView: View {
             VStack(spacing: 0) {
                 breadcrumbBar
                 Divider()
+                if model.searchActive { searchBanner; Divider() }
                 if let message = model.errorMessage { errorBanner(message) }
                 HSplitView {
                     browserContent
@@ -24,15 +25,25 @@ struct BrowserView: View {
         .frame(minWidth: 900, minHeight: 490)
         .tint(Color(red: 0.13, green: 0.43, blue: 0.86))
         .sheet(isPresented: $model.showFileAccess) { FileAccessView() }
+        .sheet(isPresented: $model.showSearch) { SearchSheet(model: model) }
         .onExitCommand { if !model.filter.isEmpty { model.filter = "" } }
     }
     private var browserContent: some View {
                 ZStack {
                     if model.viewMode == .list { FileTable(model: model) } else { FileIcons(model: model) }
                     if model.entries.isEmpty {
-                        if model.isLoading {
-                            VStack(spacing: 12) { ProgressView().controlSize(.small); Text("Opening folder…").foregroundStyle(.secondary) }
+                        if model.isLoading || model.searchRunning {
+                            VStack(spacing: 12) { ProgressView().controlSize(.small); Text(model.searchRunning ? "Searching…" : "Opening folder…").foregroundStyle(.secondary) }
                                 .frame(maxWidth: .infinity, maxHeight: .infinity).background(.background)
+                        } else if model.searchActive {
+                            ContentUnavailableView {
+                                Label("No matches shown", systemImage: "magnifyingglass")
+                            } description: {
+                                Text(model.searchSummary)
+                            } actions: {
+                                if model.searchCoverage == .indexUnverified { Button("Scan This Folder", action: model.rescan) }
+                                Button("Clear Search", action: model.clearSearch)
+                            }.allowsHitTesting(true)
                         } else {
                             ContentUnavailableView {
                                 Label(model.errorMessage != nil ? "Folder unavailable" : model.filter.isEmpty ? "A little room to breathe" : "No matching files",
@@ -67,6 +78,20 @@ struct BrowserView: View {
                     ForEach(model.workspace.shortcuts) { shortcut in shortcutButton(shortcut) }
                     Button(action: model.pinCurrentFolder) { Label("Pin Current Folder", systemImage: "pin").frame(maxWidth: .infinity, alignment: .leading) }
                         .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 8)
+                    let pinnedSearches = model.workspace.savedSearches.filter(\.pinned)
+                    if !pinnedSearches.isEmpty {
+                        sidebarLabel("Searches").padding(.top, 23)
+                        ForEach(pinnedSearches) { search in
+                            Button { model.runSavedSearch(search) } label: {
+                                Label(search.title, systemImage: "magnifyingglass").frame(maxWidth: .infinity, alignment: .leading)
+                            }.buttonStyle(.plain).font(.system(size: 13)).padding(.horizontal, 12).padding(.vertical, 8)
+                                .contextMenu {
+                                    Button("Rename…") { model.renameSavedSearch(search) }
+                                    Button("Unpin") { model.workspace.setSearchPinned(search.id, pinned: false) }
+                                    Button("Remove Search") { model.workspace.removeSearch(search.id) }
+                                }
+                        }
+                    }
                     sidebarLabel("Locations").padding(.top, 23)
                     ForEach(model.volumes) { place in placeButton(place) }
                 }.padding(.horizontal, 10)
@@ -138,6 +163,15 @@ struct BrowserView: View {
                 }
             }.padding(.horizontal, 23).padding(.vertical, 11)
         }.background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+    }
+    private var searchBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Color.accentColor)
+            Text(model.searchSummary).font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
+            if model.searchRunning { Button("Cancel", action: model.cancelSearch).buttonStyle(.link) }
+            else if model.searchCoverage == .indexUnverified { Button("Scan This Folder", action: model.rescan).buttonStyle(.link) }
+            Button("Clear", action: model.clearSearch).buttonStyle(.link)
+        }.padding(12).background(Color.accentColor.opacity(0.06))
     }
     private func errorBanner(_ message: String) -> some View {
         HStack(alignment: .top, spacing: 10) {

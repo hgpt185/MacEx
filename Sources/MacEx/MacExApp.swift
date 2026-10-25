@@ -51,7 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             let url = stateURL
             do {
                 let saved = try await Task.detached(priority: .userInitiated) { try WorkspacePersistence.load(from: url) }.value
-                if let saved { workspace.shortcuts = saved.shortcuts }
+                if let saved {
+                    workspace.shortcuts = saved.shortcuts
+                    workspace.savedSearches = saved.savedSearches
+                }
                 if initialFolder == nil, let saved, !saved.windows.isEmpty {
                     var groups: [UUID: NSWindow] = [:]
                     var selected: [UUID: NSWindow] = [:]
@@ -143,10 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
     private func save(terminating: Bool = false) {
-        let drafts = drafts(); let shortcuts = workspace.shortcuts; let url = stateURL
+        let drafts = drafts(); let shortcuts = workspace.shortcuts; let searches = workspace.savedSearches; let url = stateURL
         saveQueue.async { [weak self] in
             do {
-                try WorkspacePersistence.save(WorkspaceSnapshot(shortcuts: shortcuts, windows: drafts.map { $0.snapshot() }), to: url)
+                try WorkspacePersistence.save(WorkspaceSnapshot(shortcuts: shortcuts, windows: drafts.map { $0.snapshot() }, savedSearches: searches), to: url)
                 if terminating { Task { @MainActor in NSApp.reply(toApplicationShouldTerminate: true) } }
             } catch {
                 let message = error.localizedDescription
@@ -191,12 +194,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             appearanceMenu.submenu?.addItem(choice)
         }
         menu("View", [item("Filter This Folder", #selector(filterFolder), "f"),
+                      item("Search in This Folder…", #selector(searchFolder), "f", [.command, .option]),
                       item("as Icons", #selector(icons), "1"), item("as List", #selector(list), "2"),
                       item("Quick Look", #selector(quickLook)), item("Show Preview Pane", #selector(previewPane), "p", [.command, .shift]),
                       item("Show Hidden Files", #selector(hidden), ".", [.command, .shift]),
                       item("Refresh", #selector(refresh), "r"), item("Operations", #selector(operations)), item("Clear Thumbnail Cache", #selector(clearThumbnails)), .separator(), appearanceMenu])
         menu("Go", [item("Back", #selector(back), "["), item("Forward", #selector(forward), "]"),
                     item("Enclosing Folder", #selector(parent), "\u{f700}"),
+                    item("Reveal in Enclosing Folder", #selector(revealSearchParent)),
                     item("Open Selection", #selector(openSelected), "\u{f701}"),
                     item("Go to Folder…", #selector(goToFolder), "g", [.command, .shift])])
         menu("Window", [item("Next Tab", #selector(nextTab), "\t", [.control]), item("Previous Tab", #selector(previousTab), "\t", [.control, .shift]),
@@ -218,6 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case #selector(back): return !model.backHistory.isEmpty
         case #selector(forward): return !model.forwardHistory.isEmpty
         case #selector(parent): return model.location.path != "/"
+        case #selector(revealSearchParent): return model.searchActive && model.selection.count == 1
         case #selector(hidden): item.state = model.showHidden ? .on : .off; return true
         case #selector(changeAppearance(_:)):
             item.state = item.representedObject as? String == (UserDefaults.standard.string(forKey: "appearance") ?? "system") ? .on : .off
@@ -261,6 +267,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func copyPaths() { model.copyPaths() }
     @objc func hidden() { model.showHidden.toggle() }
     @objc func filterFolder() { NotificationCenter.default.post(name: .macexFocusFilter, object: nil) }
+    @objc func searchFolder() {
+        if activeController == nil { createWindow() }
+        model.showSearch = true
+    }
+    @objc func revealSearchParent() { model.revealInEnclosingFolder() }
     @objc func changeAppearance(_ sender: NSMenuItem) {
         let value = sender.representedObject as? String ?? "system"
         UserDefaults.standard.set(value, forKey: "appearance")
@@ -278,7 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func about() { NSApplication.shared.orderFrontStandardAboutPanel(nil) }
     @objc func shortcuts() {
         let alert = NSAlert(); alert.messageText = "Move through your files"
-        alert.informativeText = "⌘N / ⌘T  New window / tab\n⌘W  Close tab / window\nControl-Tab  Next tab\n⌘1 / ⌘2  Icon / list view\nSpace  Quick Look\n⇧⌘P  Preview pane\n⌘O / ⌘↓  Open selection\n⌘↑  Enclosing folder\n⌘[ / ⌘]  Back / Forward\n⇧⌘G  Go to folder\n⇧⌘N  New folder\nReturn  Rename\n⌘C / ⌘V  Copy / Paste\n⌥⌘V  Move copied items here\n⌘D  Duplicate\n⌘⌫  Move to Trash\n⌃⌘T  Add folder to sidebar\n⇧⌘.  Hidden files\n⌘F  Filter folder\n⌘R  Refresh\n\nDrops copy by default. Hold Command to request a move when the source permits it. The destination shows the action before you drop."
+        alert.informativeText = "⌘N / ⌘T  New window / tab\n⌘W  Close tab / window\nControl-Tab  Next tab\n⌘1 / ⌘2  Icon / list view\nSpace  Quick Look\n⇧⌘P  Preview pane\n⌘O / ⌘↓  Open selection\n⌘↑  Enclosing folder\n⌘[ / ⌘]  Back / Forward\n⇧⌘G  Go to folder\n⌥⌘F  Search this folder\n⇧⌘N  New folder\nReturn  Rename\n⌘C / ⌘V  Copy / Paste\n⌥⌘V  Move copied items here\n⌘D  Duplicate\n⌘⌫  Move to Trash\n⌃⌘T  Add folder to sidebar\n⇧⌘.  Hidden files\n⌘F  Filter folder\n⌘R  Refresh\n\nDrops copy by default. Hold Command to request a move when the source permits it. The destination shows the action before you drop."
         if let mainWindow { alert.beginSheetModal(for: mainWindow) }
     }
 }

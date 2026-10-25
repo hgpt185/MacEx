@@ -40,6 +40,12 @@ final class BrowserModel: ObservableObject {
     var jobAction: FileAction? { workspace.jobs.action }
     var summary: JobSummary? { workspace.jobs.summary }
     @Published var showingOperations = false
+    @Published var showSearch = false
+    @Published var searchFields = SearchFields()
+    @Published var searchActive = false
+    @Published var searchRunning = false
+    @Published var searchSummary = ""
+    @Published var searchCoverage: SearchCoverage?
     @Published var clipboardURLs: [URL] = []
     weak var window: NSWindow?
     private var allEntries: [FileEntry] = []
@@ -47,6 +53,11 @@ final class BrowserModel: ObservableObject {
     private var watcher: DirectoryWatcher?
     private var refreshTask: Task<Void, Never>?
     private var generation = UUID()
+    private var searchToken = UUID()
+    private var searchControl: JobControl?
+    private var activeRequest: SearchRequest?
+    private var revealAfterLoad: URL?
+    private let spotlight = SpotlightRunner()
     private var volumeObservers: VolumeObservers?
     private var subscriptions: Set<AnyCancellable> = []
     var busy: Bool { workspace.jobs.busy }
@@ -102,6 +113,7 @@ final class BrowserModel: ObservableObject {
     }
 
     func navigate(_ url: URL, record: Bool = true) {
+        endSearchListing()
         let target = url.resolvingSymlinksInPath().standardizedFileURL
         if record && target != location { backHistory = Array((backHistory + [location]).suffix(30)); forwardHistory = [] }
         location = target
@@ -115,6 +127,7 @@ final class BrowserModel: ObservableObject {
     func parent() { guard location.path != "/" else { return }; navigate(location.deletingLastPathComponent()) }
 
     func reload() {
+        guard !searchActive else { return }
         loadControl?.cancel()
         let control = JobControl(); loadControl = control
         let url = location; let token = UUID(); generation = token
@@ -129,6 +142,10 @@ final class BrowserModel: ObservableObject {
                 }
                 guard generation == token else { return }
                 allEntries = result; applyFilter(); isLoading = false
+                if let revealAfterLoad {
+                    if entries.contains(where: { $0.url == revealAfterLoad }) { selection = [revealAfterLoad] }
+                    self.revealAfterLoad = nil
+                }
                 if watcher == nil && isVisible {
                     watcher = DirectoryWatcher(url: url) { [weak self] in
                         Task { @MainActor [weak self] in self?.scheduleRefresh() }
@@ -150,7 +167,7 @@ final class BrowserModel: ObservableObject {
     }
     private func applyFilter() {
         entries = DirectoryReader.sorted(allEntries.filter {
-            (showHidden || !$0.isHidden) && (filter.isEmpty || $0.name.localizedStandardContains(filter))
+            (searchActive || showHidden || !$0.isHidden) && (searchActive || filter.isEmpty || $0.name.localizedStandardContains(filter))
         }, by: sort, ascending: ascending, foldersFirst: foldersFirst)
         selection.formIntersection(Set(entries.map(\.url)))
     }
@@ -293,6 +310,95 @@ final class BrowserModel: ObservableObject {
         alert.accessoryView = field; alert.addButton(withTitle: button); alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = field
         alert.beginSheetModal(for: window) { response in if response == .alertFirstButtonReturn { completion(field.stringValue) } }
+    }
+
+    func searchSpotlight(_ request: SearchRequest) { beginSearch(request, scan: false) }
+    func scan(_ request: SearchRequest) { beginSearch(request, scan: true) }
+    func rescan() { if let activeRequest { scan(activeRequest) } }
+    func runSavedSearch(_ search: SavedSearch) {
+        let url = URL(fileURLWithPath: search.request.scope, isDirectory: true)
+        if url.standardizedFileURL != location.standardizedFileURL { navigate(url) }
+        searchSpotlight(search.request)
+    }
+    func clearSearch() {
+        endSearchListing()
+        reload()
+    }
+    func cancelSearch() {
+        searchToken = UUID(); spotlight.cancel(); searchControl?.cancel()
+        searchRunning = false
+        searchSummary = "Search cancelled. An unfinished Spotlight result is not treated as a complete answer."
+    }
+    func revealInEnclosingFolder() {
+        guard searchActive, selection.count == 1, let url = selection.first else { return }
+        let parent = url.deletingLastPathComponent()
+        endSearchListing()
+        navigate(parent)
+        revealAfterLoad = url
+    }
+    func renameSavedSearch(_ search: SavedSearch) {
+        prompt(title: "Rename Search", message: "This changes the sidebar label only.", initial: search.title, button: "Rename") { [weak self] name in
+            self?.workspace.renameSearch(search.id, title: name)
+        }
+    }
+    private func beginSearch(_ request: SearchRequest, scan: Bool) {
+        loadControl?.cancel(); generation = UUID(); isLoading = false
+        watcher = nil; refreshTask?.cancel(); errorMessage = nil
+        activeRequest = request
+        searchToken = UUID()
+        spotlight.cancel(); searchControl?.cancel()
+        searchActive = true
+        searchRunning = true
+        searchCoverage = nil
+        searchSummary = scan ? "Scanning this folder…" : "Asking Spotlight…"
+        allEntries = []; entries = []; selection = []
+        if scan { scanFolder(request, token: searchToken) }
+        else { spotlight.start(request, token: searchToken) { [weak self] token, coverage, urls in self?.applySpotlight(token, coverage, urls) } }
+    }
+    private func scanFolder(_ request: SearchRequest, token: UUID) {
+        let control = JobControl(); searchControl = control
+        let receiver = self
+        Task { [weak self, receiver] in
+            let result = await Task.detached(priority: .userInitiated) { [receiver] in
+                FolderScan.run(request, control: control) { examined, matches, _ in
+                    guard examined == 1 || examined.isMultiple(of: 250) else { return }
+                    Task { @MainActor [weak receiver] in
+                        guard let receiver, receiver.searchToken == token, receiver.searchRunning else { return }
+                        receiver.searchSummary = "Scanning: \(examined.formatted()) items checked, \(matches.formatted()) matches…"
+                    }
+                }
+            }.value
+            self?.applyScan(token, result)
+        }
+    }
+    private func applyScan(_ token: UUID, _ result: FolderScanResult) {
+        guard SearchFreshness.isCurrent(result: token, active: searchToken) else { return }
+        searchRunning = false
+        searchControl = nil
+        searchCoverage = .folderScan
+        allEntries = result.matches
+        applyFilter()
+        var summary = SearchCoverage.folderScan.summary(matches: result.matches.count, cancelled: result.cancelled, reachedLimit: result.reachedLimit)
+        if !result.skipped.isEmpty { summary += "\n" + result.skipped.prefix(4).joined(separator: "\n") }
+        searchSummary = summary
+    }
+    private func applySpotlight(_ token: UUID, _ coverage: SearchCoverage, _ urls: [URL]) {
+        guard SearchFreshness.isCurrent(result: token, active: searchToken) else { return }
+        let entries = urls.compactMap { try? FileEntry(url: $0) }
+        searchRunning = false
+        searchCoverage = coverage
+        allEntries = entries
+        applyFilter()
+        searchSummary = coverage.summary(matches: entries.count, cancelled: false, reachedLimit: false)
+    }
+    private func endSearchListing() {
+        searchToken = UUID()
+        spotlight.cancel(); searchControl?.cancel()
+        searchActive = false
+        searchRunning = false
+        searchSummary = ""
+        searchCoverage = nil
+        searchControl = nil
     }
 }
 

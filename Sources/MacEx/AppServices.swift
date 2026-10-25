@@ -5,6 +5,7 @@ import MacExCore
 @MainActor
 final class AppWorkspace: ObservableObject {
     @Published var shortcuts: [SidebarShortcut] { didSet { changed?() } }
+    @Published var savedSearches: [SavedSearch] = [] { didSet { changed?() } }
     var changed: (() -> Void)?
     let jobs = SharedJobs()
     init() {
@@ -38,6 +39,22 @@ final class AppWorkspace: ObservableObject {
         let value = shortcuts.remove(at: from)
         let destination = shortcuts.firstIndex(where: { $0.id == target }) ?? shortcuts.endIndex
         shortcuts.insert(value, at: destination)
+    }
+    func saveSearch(_ search: SavedSearch) {
+        guard savedSearches.count < 100 || savedSearches.contains(where: { $0.id == search.id }) else { return }
+        if let index = savedSearches.firstIndex(where: { $0.id == search.id }) { savedSearches[index] = search }
+        else { savedSearches.append(search) }
+    }
+    func removeSearch(_ id: UUID) { savedSearches.removeAll { $0.id == id } }
+    func renameSearch(_ id: UUID, title: String) {
+        guard let index = savedSearches.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        savedSearches[index].title = String(trimmed.prefix(150))
+    }
+    func setSearchPinned(_ id: UUID, pinned: Bool) {
+        guard let index = savedSearches.firstIndex(where: { $0.id == id }) else { return }
+        savedSearches[index].pinned = pinned
     }
 }
 

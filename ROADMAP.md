@@ -1,6 +1,6 @@
 # MacEx roadmap
 
-The approved baseline is direct distribution, macOS 14+, Intel and Apple silicon, and local daily use before advanced features. P1 and P2 implementation are authorized; P3 onward still needs authorization. Each phase must remain runnable and independently verified.
+The approved baseline is direct distribution, macOS 14+, Intel and Apple silicon, and local daily use before advanced features. P1 through P3 implementation are authorized. P4 onward still needs authorization. Each phase must remain runnable and independently verified.
 
 ## P1 — Local list-view milestone
 
@@ -17,6 +17,8 @@ Add virtualized icon view, tabs and multiple windows, Open With, drag/drop with 
 Gate: keyboard-only workflows, Finder interop, supported preview formats, memory/cache budgets, light/dark modes, unavailable bookmarks, and independent window/tab histories. Establish Developer ID, hardened runtime, universal release packaging, notarization, stapling, and minimum-OS/Intel runtime testing before public distribution.
 
 ## P3 — Conventional search
+
+Implementation status: folder search is in 0.3.0. Spotlight is queried first inside the selected folder. A separate folder scan is explicit. An empty Spotlight result is not treated as proof that nothing matches. Saved searches can be pinned. See `docs/P3-VERIFICATION.md`.
 
 Use scoped `NSMetadataQuery` before adding any general indexing engine. Implement name, extension/type, size, creation/modification dates, practical indexed content, visible coverage, cancellation, parent reveal, and saved searches that can be pinned. Offer an explicit selected-folder scan for filename/filesystem metadata and bounded text/code content when Spotlight coverage is incomplete. Never infer index completeness from an empty result.
 

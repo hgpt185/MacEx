@@ -49,6 +49,7 @@ final class FileMenuActions: NSObject {
             let other = NSMenuItem(title: "Other…", action: #selector(openOther), keyEquivalent: ""); other.target = self
             applications.addItem(other); with.submenu = applications; menu.addItem(with)
             add("Quick Look", #selector(quickLook))
+            if model.searchActive && model.selection.count == 1 { add("Show in Enclosing Folder", #selector(revealParent)) }
             menu.addItem(.separator())
             add("Rename…", #selector(rename), enabled: model.selection.count == 1 && !model.busy)
             add("Copy", #selector(copyItems)); add("Duplicate", #selector(duplicate), enabled: !model.busy)
@@ -66,6 +67,7 @@ final class FileMenuActions: NSObject {
     @objc private func openApplication(_ sender: NSMenuItem) { if let app = sender.representedObject as? URL { model.openWith(app) } }
     @objc private func openOther() { model.openWith() }
     @objc private func quickLook() { model.quickLook?() }
+    @objc private func revealParent() { model.revealInEnclosingFolder() }
     @objc private func rename() { model.rename() }
     @objc private func copyItems() { model.copySelection() }
     @objc private func copyPaths() { model.copyPaths() }

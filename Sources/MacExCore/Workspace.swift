@@ -81,13 +81,31 @@ public struct WorkspaceSnapshot: Codable, Sendable {
     public var version = 1
     public var shortcuts: [SidebarShortcut]
     public var windows: [WindowSnapshot]
-    public init(shortcuts: [SidebarShortcut] = [], windows: [WindowSnapshot] = []) {
-        self.shortcuts = shortcuts; self.windows = windows
+    public var savedSearches: [SavedSearch]
+    public init(shortcuts: [SidebarShortcut] = [], windows: [WindowSnapshot] = [], savedSearches: [SavedSearch] = []) {
+        self.shortcuts = shortcuts; self.windows = windows; self.savedSearches = savedSearches
+    }
+    private enum CodingKeys: String, CodingKey { case version, shortcuts, windows, savedSearches }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        shortcuts = try values.decodeIfPresent([SidebarShortcut].self, forKey: .shortcuts) ?? []
+        windows = try values.decodeIfPresent([WindowSnapshot].self, forKey: .windows) ?? []
+        savedSearches = try values.decodeIfPresent([SavedSearch].self, forKey: .savedSearches) ?? []
+    }
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(version, forKey: .version)
+        try values.encode(shortcuts, forKey: .shortcuts)
+        try values.encode(windows, forKey: .windows)
+        try values.encode(savedSearches, forKey: .savedSearches)
     }
     public func validated() throws -> WorkspaceSnapshot {
         guard version == 1 else { throw FileFailure.message("This workspace uses an unsupported version. The saved file has not been changed.") }
-        guard shortcuts.count <= 200, windows.count <= 100, Set(shortcuts.map(\.id)).count == shortcuts.count,
+        guard shortcuts.count <= 200, windows.count <= 100, savedSearches.count <= 100,
+              Set(shortcuts.map(\.id)).count == shortcuts.count,
               Set(windows.map(\.id)).count == windows.count,
+              Set(savedSearches.map(\.id)).count == savedSearches.count,
               windows.allSatisfy({ $0.browser.back.count <= 30 && $0.browser.forward.count <= 30 }) else {
             throw FileFailure.message("The saved workspace exceeds its limits or contains duplicate identifiers.")
         }
