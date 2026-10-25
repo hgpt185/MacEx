@@ -10,7 +10,7 @@ This builds both architectures and produces:
 
 - `dist/MacEx.app`: universal ad-hoc signed development app.
 - `dist/release/MacEx.app`: universal ad-hoc signed app with hardened runtime.
-- `dist/MacEx-0.3.0.dmg`: local development disk image containing that app.
+- `dist/MacEx-0.4.0.dmg`: local development disk image containing that app.
 
 The prepared disk image is not notarized or suitable for a public release. The normal app needs no account, backend, paid AI service, or API key.
 

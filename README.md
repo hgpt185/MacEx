@@ -1,6 +1,6 @@
 # MacEx
 
-A standalone native macOS file manager. Version **0.3.0** carries P1, P2, and conventional folder search. MacEx coexists with Finder; it does not replace the desktop or system file dialogs. Public-release verification remains incomplete.
+A standalone native macOS file manager. Version **0.4.0** carries P1–P4: local browsing, daily-use polish, conventional folder search, and reviewed cleanup. MacEx coexists with Finder; it does not replace the desktop or system file dialogs. Public-release verification remains incomplete.
 
 ## Build and run
 
@@ -69,6 +69,16 @@ Testing can isolate workspace persistence by adding `--state-directory /absolute
 
 View → Search in This Folder… (`⌥⌘F`) searches the folder that is open. Spotlight runs first and is limited to that folder. The result banner says whether Spotlight had indexed items in the folder. An empty Spotlight result is not treated as “nothing matches.” Scan This Folder then checks names, extensions, kind, size, created and modified dates, and text up to 1 MiB per file. Symbolic links are not followed. Saved searches can be pinned in the sidebar. Show in Enclosing Folder returns to the file’s parent.
 
+## Cleanup review
+
+Open **Cleanup Review** in the sidebar or View menu. Choose up to 16 folders or add the current folder, then explicitly start a scan. No scan runs at launch. The dashboard shows verified duplicates, large files (editable **1024 MiB / 1 GiB** default), old Downloads (editable **90-day modification age** default, restricted to Downloads within the selected roots), and empty regular files. Empty files can be intentional placeholders or markers; candidates are never described as universally safe to delete.
+
+Duplicate detection groups independent file identities by size, optionally checks sample hashes, computes SHA-256, and compares every byte before reporting a duplicate. It compares data forks; metadata and resource forks may differ. Hard-link aliases are tracked once per inode and are review-only for cleanup. Scans reject arbitrary symlink components, exclude system locations, Library, Trash, Git internals, staging directories, packages, and nested volumes, and report permission failures and other skips. macOS's fixed `/var`, `/tmp`, and `/etc` aliases are expanded to `/private` before opening components without following links. Select nested volumes as separate roots.
+
+All deletion selections start empty. Choose a retained copy for each duplicate group, select individual candidates, and open **Review Selected…**. The review shows the exact selected/retained paths and logical/estimated allocated bytes. **Move Reviewed Files to Trash** revalidates the entire selection before starting, then revalidates each selected file and retained duplicate again at its Trash boundary. Changed/missing files stop cleanup; completed moves remain in Trash. There is no permanent-delete fallback. A new scan is required after cleanup. Hard-linked candidates cannot be selected.
+
+Allocated space is an estimate: APFS clones, snapshots, compression, hard links, and open files affect physical storage. Moving to Trash retains the data until Trash is emptied in Finder. Live writers cannot be universally frozen by file coordination; see [P4 verification](docs/P4-VERIFICATION.md) for bounds and limitations.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -118,7 +128,7 @@ File coordination does not freeze uncooperative writers. A changing filesystem c
 - A process crash or forced termination can leave staging directories. There is no automatic recovery or automatic deletion of abandoned staging data. Review such paths manually.
 - Directory events refresh membership. Some in-place child-file edits may require `⌘R` to refresh metadata until richer event tracking is added.
 - File promises (for example, dragging a not-yet-downloaded attachment from another app) are not supported; drag actual files instead. Sidebar drag targets reorder shortcuts rather than transfer files.
-- No file-operation Undo, OCR, SFTP, or cleanup dashboard yet. Saved searches and folder search are in P3. The rest remain in [ROADMAP.md](ROADMAP.md).
+- No file-operation Undo, OCR, or SFTP yet. Folder search and reviewed cleanup are implemented. Later phases remain in [ROADMAP.md](ROADMAP.md).
 
 MacEx runs without App Sandbox in this preview, under your normal macOS account permissions. It does not elevate privileges or bypass SIP, ACLs, or privacy settings. Desktop/Documents/Downloads and volume privacy prompts occur only when those locations are accessed. Full Disk Access is not required for ordinary use. Users can optionally grant it in System Settings → Privacy & Security → Full Disk Access to cover the Files and Folders privacy checks with a broader grant. Installation cannot grant this automatically. Permission choices are managed by macOS; Developer ID releases need a stable signing identity so updates can be recognized as the same app. Ad-hoc development rebuilds can cause repeat prompts. Full Disk Access does not bypass other protections or App Sandbox restrictions. Hidden-file and appearance preferences use `UserDefaults`; the app does not persist file contents or credentials.
 
@@ -138,12 +148,12 @@ MACEX_TEST_VOLUME=/absolute/path/to/disposable/mount zsh Scripts/test.sh
 
 That test creates/removes only its own UUID directory on that volume. It skips when the variable is absent. Do not point it at a personal folder and mistake a same-volume result for cross-volume verification.
 
-See [docs/P2-VERIFICATION.md](docs/P2-VERIFICATION.md) for current measured results, UI checks, and explicit verification gaps. The original P1 report remains in [docs/VERIFICATION.md](docs/VERIFICATION.md).
+See [P4 verification](docs/P4-VERIFICATION.md) and [P3 verification](docs/P3-VERIFICATION.md) for current phase evidence. [P2 verification](docs/P2-VERIFICATION.md) records the existing public-release gaps. The original P1 report remains in [docs/VERIFICATION.md](docs/VERIFICATION.md).
 
 ## Structure
 
 - `MacEx`: SwiftUI layout, native AppKit list/grid/tabs/windows, Quick Look integration, bounded thumbnails, shared jobs, and main-actor browser state.
-- `MacExCore`: directory reading, metadata, job control, file coordination, manifests, operations, workspace storage, drop policy, and bounded text reading.
+- `MacExCore`: directory reading, metadata, job control, file coordination, manifests, operations, workspace storage, drop policy, bounded text reading, selected-root duplicate scanning, and revalidated cleanup.
 - `CFileOps`: small Darwin `copyfile` progress/cancellation and exclusive-rename adapter. System libraries only.
 - `Tests`: Swift Testing integration fixtures, a 10,000-entry benchmark, and Xcode-only UI fixtures.
 

@@ -10,7 +10,7 @@ final class MacExUITests: XCTestCase {
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Destination"), withIntermediateDirectories: true)
         try Data("P2 UI fixture text\n".utf8).write(to: root.appendingPathComponent("Welcome.txt"))
         app = XCUIApplication(bundleIdentifier: "local.macex.app.uihost")
-        app.launchArguments = ["--folder", root.path, "--state-directory", root.appendingPathComponent("State").path]
+        app.launchArguments = ["--folder", root.path, "--state-directory", root.appendingPathComponent("State").path, "-fileAccessChoiceSeen", "YES"]
         app.launch()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
     }
@@ -67,9 +67,43 @@ final class MacExUITests: XCTestCase {
         app.typeKey("q", modifierFlags: .command)
         let quit = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in self.app.state == .notRunning }, object: nil)
         wait(for: [quit], timeout: 10)
-        app.launchArguments = ["--state-directory", root.appendingPathComponent("State").path]
+        app.launchArguments = ["--state-directory", root.appendingPathComponent("State").path, "-fileAccessChoiceSeen", "YES"]
         app.launch()
         XCTAssertTrue(app.windows.matching(NSPredicate(format: "title CONTAINS %@", "Destination")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.collectionViews["file-icons"].exists)
     }
+    func testCleanupStartsUnselectedAndRejectsChangedRetainedCopy() throws {
+        let a = root.appendingPathComponent("Copy A.txt")
+        let b = root.appendingPathComponent("Copy B.txt")
+        let data = Data("Disposable P4 UI duplicate \(UUID().uuidString)".utf8)
+        try data.write(to: a); try data.write(to: b)
+        app.buttons["Cleanup Review"].click()
+        app.buttons["Add Current Folder"].click()
+        app.buttons["Start Scan"].click()
+        let selected = app.checkBoxes["Select \(b.path)"]
+        XCTAssertTrue(selected.waitForExistence(timeout: 10))
+        XCTAssertEqual(selected.value as? String, "0")
+        XCTAssertFalse(app.buttons["Review Selected…"].isEnabled)
+        app.popUpButtons["Retain copy"].firstMatch.click()
+        app.menuItems[a.path].click()
+        XCTAssertFalse(app.checkBoxes["Select \(a.path)"].isEnabled)
+        selected.click()
+        app.buttons["Review Selected…"].click()
+        XCTAssertTrue(app.buttons["Move Reviewed Files to Trash"].waitForExistence(timeout: 5))
+        try Data("Changed after review".utf8).write(to: a)
+        app.buttons["Move Reviewed Files to Trash"].click()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Moved 0 file(s) to Trash")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: b.path))
+    }
+
+    func testSpotlightDeadlineIncludesQueryStartup() {
+        app.typeKey("f", modifierFlags: [.command, .option])
+        let field = app.sheets.textFields["Name contains"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.click(); field.typeText("Disposable-\(UUID().uuidString)")
+        app.sheets.buttons["Search Spotlight"].click()
+        let settled = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND NOT (label CONTAINS %@)", "Spotlight", "Asking Spotlight")).firstMatch
+        XCTAssertTrue(settled.waitForExistence(timeout: 25))
+    }
+
 }

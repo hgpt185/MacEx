@@ -40,6 +40,7 @@ final class BrowserModel: ObservableObject {
     var jobAction: FileAction? { workspace.jobs.action }
     var summary: JobSummary? { workspace.jobs.summary }
     @Published var showingOperations = false
+    @Published var showCleanup = false
     @Published var showSearch = false
     @Published var searchFields = SearchFields()
     @Published var searchActive = false

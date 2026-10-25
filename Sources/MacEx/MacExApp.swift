@@ -198,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                       item("as Icons", #selector(icons), "1"), item("as List", #selector(list), "2"),
                       item("Quick Look", #selector(quickLook)), item("Show Preview Pane", #selector(previewPane), "p", [.command, .shift]),
                       item("Show Hidden Files", #selector(hidden), ".", [.command, .shift]),
-                      item("Refresh", #selector(refresh), "r"), item("Operations", #selector(operations)), item("Clear Thumbnail Cache", #selector(clearThumbnails)), .separator(), appearanceMenu])
+                      item("Refresh", #selector(refresh), "r"), item("Operations", #selector(operations)), item("Cleanup Review…", #selector(cleanup)), item("Clear Thumbnail Cache", #selector(clearThumbnails)), .separator(), appearanceMenu])
         menu("Go", [item("Back", #selector(back), "["), item("Forward", #selector(forward), "]"),
                     item("Enclosing Folder", #selector(parent), "\u{f700}"),
                     item("Reveal in Enclosing Folder", #selector(revealSearchParent)),
@@ -278,6 +278,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSApplication.shared.appearance = value == "system" ? nil : NSAppearance(named: value == "light" ? .aqua : .darkAqua)
     }
     @objc func refresh() { model.reload() }
+    @objc func cleanup() {
+        if activeController == nil { createWindow() }
+        model.showCleanup = true
+    }
     @objc func operations() { model.showingOperations.toggle() }
     @objc func back() { model.back() }
     @objc func forward() { model.forward() }

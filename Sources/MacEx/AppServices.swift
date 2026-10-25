@@ -8,6 +8,7 @@ final class AppWorkspace: ObservableObject {
     @Published var savedSearches: [SavedSearch] = [] { didSet { changed?() } }
     var changed: (() -> Void)?
     let jobs = SharedJobs()
+    let cleanup = CleanupModel()
     init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let defaults = [("Home", "house", home), ("Desktop", "desktopcomputer", home.appendingPathComponent("Desktop")),
@@ -83,6 +84,23 @@ final class SharedJobs: ObservableObject {
                     summary = result; self.control = nil; busy = false; progress = nil
                     NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
                     if !result.errors.isEmpty { owner.errorMessage = result.errors.joined(separator: "\n") }
+                }
+            }
+        }
+    }
+    func startCleanup(_ review: CleanupReview, owner: BrowserModel, completion: @escaping (JobSummary) -> Void) {
+        guard !busy else { return }
+        let control = JobControl(); self.control = control; self.owner = owner
+        action = .trash; summary = nil; busy = true
+        Task {
+            for await event in MacExCore.OperationQueue.startCleanup(review, control: control) {
+                switch event {
+                case let .progress(value): progress = value
+                case let .finished(result):
+                    summary = result; self.control = nil; busy = false; progress = nil
+                    NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
+                    completion(result)
+                case .conflict: break
                 }
             }
         }

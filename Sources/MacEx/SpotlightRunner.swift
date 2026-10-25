@@ -12,25 +12,35 @@ final class SpotlightRunner: NSObject {
     private var probeFinished = false
     private var onResult: ((UUID, SearchCoverage, [URL]) -> Void)?
 
-    private var timeout: Task<Void, Never>?
+    private var deadline: Timer?
 
     func start(_ request: SearchRequest, token: UUID, onResult: @escaping (UUID, SearchCoverage, [URL]) -> Void) {
         cancel()
         self.token = token
         self.scope = request.scope
         self.onResult = onResult
-        filterQuery = makeQuery(SpotlightPredicate.filter(for: request), token: token)
-        probeQuery = makeQuery(SpotlightPredicate.probe(), token: token)
-        guard filterQuery?.start() == true, probeQuery?.start() == true else { finishUnverified(); return }
-        timeout = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(15))
-            guard !Task.isCancelled else { return }
-            self?.finishUnverified()
+        let filter = makeQuery(SpotlightPredicate.filter(for: request))
+        let probe = makeQuery(SpotlightPredicate.probe())
+        filterQuery = filter; probeQuery = probe
+        // NSMetadataQuery.start can enter a nested run loop. Arm the deadline first.
+        let timer = Timer(timeInterval: 15, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.token == token else { return }
+                self.finishUnverified()
+            }
         }
+        deadline = timer
+        RunLoop.main.add(timer, forMode: .common)
+        let filterStarted = filter.start()
+        guard self.token == token else { return }
+        guard filterStarted else { finishUnverified(); return }
+        let probeStarted = probe.start()
+        guard self.token == token else { return }
+        guard probeStarted else { finishUnverified(); return }
     }
 
     func cancel() {
-        timeout?.cancel(); timeout = nil
+        deadline?.invalidate(); deadline = nil
         NotificationCenter.default.removeObserver(self)
         filterQuery?.stop(); probeQuery?.stop()
         filterQuery = nil; probeQuery = nil
@@ -43,12 +53,11 @@ final class SpotlightRunner: NSObject {
         callback(token, .indexUnverified, [])
     }
 
-    private func makeQuery(_ predicate: NSPredicate, token: UUID) -> NSMetadataQuery {
+    private func makeQuery(_ predicate: NSPredicate) -> NSMetadataQuery {
         let query = NSMetadataQuery()
         query.searchScopes = [URL(fileURLWithPath: scope, isDirectory: true)]
         query.predicate = predicate
         NotificationCenter.default.addObserver(self, selector: #selector(gather(_:)), name: .NSMetadataQueryDidFinishGathering, object: query)
-        _ = token
         return query
     }
 

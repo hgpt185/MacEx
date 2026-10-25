@@ -64,6 +64,16 @@ public enum JobEvent: Sendable {
 
 public enum OperationQueue {
     private static let queue = DispatchQueue(label: "app.macex.mutations", qos: .userInitiated)
+    public static func startCleanup(_ review: CleanupReview, control: JobControl) -> AsyncStream<JobEvent> {
+        AsyncStream { continuation in
+            queue.async {
+                let summary = CleanupTrash.perform(review, control: control) { text in
+                    continuation.yield(.progress(JobProgress(item: text, completed: 0, total: review.selected.count, bytes: 0)))
+                }
+                continuation.yield(.finished(summary)); continuation.finish()
+            }
+        }
+    }
     public static func start(_ request: OperationRequest, control: JobControl) -> AsyncStream<JobEvent> {
         AsyncStream { continuation in
             queue.async {

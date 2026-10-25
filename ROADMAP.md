@@ -1,6 +1,6 @@
 # MacEx roadmap
 
-The approved baseline is direct distribution, macOS 14+, Intel and Apple silicon, and local daily use before advanced features. P1 through P3 implementation are authorized. P4 onward still needs authorization. Each phase must remain runnable and independently verified.
+The approved baseline is direct distribution, macOS 14+, Intel and Apple silicon, and local daily use before advanced features. P1 through P4 implementation are authorized. P5 onward still needs authorization. Each phase must remain runnable and independently verified.
 
 ## P1 — Local list-view milestone
 
@@ -25,6 +25,8 @@ Use scoped `NSMetadataQuery` before adding any general indexing engine. Implemen
 Gate: deterministic fixtures for each filter, scope isolation, indexed versus unindexed behavior, stale-query rejection, progress/skips, date boundaries, and saved-search persistence.
 
 ## P4 — Duplicates and cleanup
+
+Implementation status: implemented in 0.4.0 with selected-root scans, verified duplicate groups, hard-link accounting, editable large-file/Downloads-age thresholds, empty-file explanations, explicit retained copies and selections, separate review, and revalidation before Trash. Deterministic fixtures and native review/error-path checks are recorded in `docs/P4-VERIFICATION.md`. Existing public-release gates remain open.
 
 Selected-root scans group by size, then optional sample hashes, SHA-256, and final byte comparison. Track identities and hard links. Review duplicate groups, retained copies, paths, sizes, and estimates. Revalidate before cleanup. Never follow links, preselect deletion candidates, or use personal test files.
 

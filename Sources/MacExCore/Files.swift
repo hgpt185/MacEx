@@ -17,6 +17,10 @@ public struct FileIdentity: Equatable, Sendable {
         guard url.withUnsafeFileSystemRepresentation({ lstat($0!, &value) }) == 0 else {
             throw FileFailure.posix(errno, url)
         }
+        self.init(value)
+    }
+
+    init(_ value: stat) {
         device = value.st_dev; inode = value.st_ino; mode = value.st_mode
         size = value.st_size
         modifiedSeconds = value.st_mtimespec.tv_sec; modifiedNanos = value.st_mtimespec.tv_nsec
