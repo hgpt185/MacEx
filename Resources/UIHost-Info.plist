@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>MacEx UI Host</string>
+	<key>CFBundleExecutable</key>
+	<string>MacEx</string>
+	<key>CFBundleIconFile</key>
+	<string>MacEx</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.macex.app.uihost</string>
+	<key>CFBundleName</key>
+	<string>MacEx</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.2.0</string>
+	<key>CFBundleVersion</key>
+	<string>2</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>MacEx browses and manages files in Desktop when you open that location.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>MacEx browses and manages files in Documents when you open that location.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>MacEx browses and manages files in Downloads when you open that location.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>MacEx development preview</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>MacEx browses and transfers files on mounted network volumes you choose.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>MacEx browses and transfers files on drives you choose.</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>MacEx Sidebar Shortcut</string>
+			<key>UTTypeIdentifier</key>
+			<string>local.macex.sidebar-shortcut</string>
+		</dict>
+	</array>
+</dict>
+</plist>
