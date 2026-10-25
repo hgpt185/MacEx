@@ -43,6 +43,10 @@ if [[ "$mode" == "--sign-and-notarize" ]]; then
     spctl --assess --type open --context context:primary-signature --verbose=2 "$image"
     print "Signed and notarized release: $image"
 else
-    print "Prepared local development DMG: $image"
-    print "NOT a public release: Developer ID signing and notarization have not been performed."
+    print "Prepared open-source GitHub preview: $image"
+    print "Ad-hoc signed; Developer ID signing and notarization are deferred."
 fi
+archive="$PWD/dist/MacEx-$version.zip"
+ditto -c -k --keepParent "$bundle" "$archive"
+(cd dist && shasum -a 256 "MacEx-$version.dmg" "MacEx-$version.zip" > "MacEx-$version-SHA256SUMS.txt")
+print "GitHub assets: $image, $archive, dist/MacEx-$version-SHA256SUMS.txt"

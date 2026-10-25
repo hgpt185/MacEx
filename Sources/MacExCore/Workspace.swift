@@ -82,16 +82,18 @@ public struct WorkspaceSnapshot: Codable, Sendable {
     public var shortcuts: [SidebarShortcut]
     public var windows: [WindowSnapshot]
     public var savedSearches: [SavedSearch]
-    public init(shortcuts: [SidebarShortcut] = [], windows: [WindowSnapshot] = [], savedSearches: [SavedSearch] = []) {
-        self.shortcuts = shortcuts; self.windows = windows; self.savedSearches = savedSearches
+    public var connections: [SFTPConnection]
+    public init(shortcuts: [SidebarShortcut] = [], windows: [WindowSnapshot] = [], savedSearches: [SavedSearch] = [], connections: [SFTPConnection] = []) {
+        self.shortcuts = shortcuts; self.windows = windows; self.savedSearches = savedSearches; self.connections = connections
     }
-    private enum CodingKeys: String, CodingKey { case version, shortcuts, windows, savedSearches }
+    private enum CodingKeys: String, CodingKey { case version, shortcuts, windows, savedSearches, connections }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         version = try values.decodeIfPresent(Int.self, forKey: .version) ?? 1
         shortcuts = try values.decodeIfPresent([SidebarShortcut].self, forKey: .shortcuts) ?? []
         windows = try values.decodeIfPresent([WindowSnapshot].self, forKey: .windows) ?? []
         savedSearches = try values.decodeIfPresent([SavedSearch].self, forKey: .savedSearches) ?? []
+        connections = try values.decodeIfPresent([SFTPConnection].self, forKey: .connections) ?? []
     }
     public func encode(to encoder: any Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
@@ -99,16 +101,19 @@ public struct WorkspaceSnapshot: Codable, Sendable {
         try values.encode(shortcuts, forKey: .shortcuts)
         try values.encode(windows, forKey: .windows)
         try values.encode(savedSearches, forKey: .savedSearches)
+        try values.encode(connections, forKey: .connections)
     }
     public func validated() throws -> WorkspaceSnapshot {
         guard version == 1 else { throw FileFailure.message("This workspace uses an unsupported version. The saved file has not been changed.") }
-        guard shortcuts.count <= 200, windows.count <= 100, savedSearches.count <= 100,
+        guard shortcuts.count <= 200, windows.count <= 100, savedSearches.count <= 100, connections.count <= 100,
+              Set(connections.map(\.id)).count == connections.count,
               Set(shortcuts.map(\.id)).count == shortcuts.count,
               Set(windows.map(\.id)).count == windows.count,
               Set(savedSearches.map(\.id)).count == savedSearches.count,
               windows.allSatisfy({ $0.browser.back.count <= 30 && $0.browser.forward.count <= 30 }) else {
             throw FileFailure.message("The saved workspace exceeds its limits or contains duplicate identifiers.")
         }
+        for connection in connections { _ = try connection.validated() }
         return self
     }
 }

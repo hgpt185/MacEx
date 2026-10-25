@@ -17,6 +17,10 @@ enum MacExApp {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     let workspace = AppWorkspace()
     private var controllers: [UUID: BrowserWindowController] = [:]
+    private var remoteControllers: [UUID: RemoteWindowController] = [:]
+    private var activeRemote: RemoteBrowserModel? {
+        ((NSApp.keyWindow?.windowController as? RemoteWindowController) ?? (NSApp.mainWindow?.windowController as? RemoteWindowController))?.model
+    }
     private var order: [UUID] = []
     private var saveTask: Task<Void, Never>?
     private let saveQueue = DispatchQueue(label: "app.macex.workspace", qos: .utility)
@@ -30,7 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     private lazy var fallback = BrowserModel(workspace: workspace)
     private var model: BrowserModel { activeController?.model ?? fallback }
-    private var mainWindow: NSWindow? { activeController?.window }
+    private var mainWindow: NSWindow? {
+        [NSApp.keyWindow, NSApp.mainWindow].compactMap { $0 }.first {
+            $0.windowController is BrowserWindowController || $0.windowController is RemoteWindowController
+        } ?? activeController?.window
+    }
     override init() {
         let arguments = CommandLine.arguments
         func argument(_ flag: String) -> String? {
@@ -45,6 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if let appearance = UserDefaults.standard.string(forKey: "appearance"), appearance != "system" {
             NSApplication.shared.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
         }
+        workspace.knownHosts = SSHKnownHosts(url: stateURL.deletingLastPathComponent().appendingPathComponent("ssh-known-hosts.json"))
+        workspace.openRemote = { [weak self] connection, secret, remember in self?.createRemote(connection, secret: secret, remember: remember) }
         buildMenu()
         NSWindow.allowsAutomaticWindowTabbing = true
         Task { [self] in
@@ -54,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 if let saved {
                     workspace.shortcuts = saved.shortcuts
                     workspace.savedSearches = saved.savedSearches
+                    workspace.connections = saved.connections
                 }
                 if initialFolder == nil, let saved, !saved.windows.isEmpty {
                     var groups: [UUID: NSWindow] = [:]
@@ -86,6 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             if !UserDefaults.standard.bool(forKey: "fileAccessChoiceSeen") { model.showFileAccess = true }
         }
     }
+    func applicationWillTerminate(_ notification: Notification) {
+        for remote in remoteControllers.values { remote.model.clearPreview(synchronous: true) }
+    }
     @discardableResult
     func createWindow(folder: URL? = nil, snapshot: BrowserSnapshot? = nil, id: UUID = UUID(), show: Bool = true) -> BrowserWindowController {
         let model = BrowserModel(initialLocation: folder, workspace: workspace, id: id, snapshot: snapshot)
@@ -104,12 +118,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         scheduleSave()
         return controller
     }
+    private func createRemote(_ connection: SFTPConnection, secret: String, remember: Bool) {
+        guard remoteControllers.count < 16, let knownHosts = workspace.knownHosts else { model.errorMessage = "At most 16 SFTP tabs can be open. Close an unused connection first."; return }
+        let base = mainWindow
+        let remote = RemoteBrowserModel(connection: connection, workspace: workspace, knownHosts: knownHosts)
+        let controller = RemoteWindowController(model: remote); let id = UUID(); remoteControllers[id] = controller
+        controller.onClose = { [weak self] in self?.remoteControllers.removeValue(forKey: id) }
+        if let base, let window = controller.window { base.addTabbedWindow(window, ordered: .above) }
+        controller.showWindow(nil); controller.window?.makeKeyAndOrderFront(nil)
+        if controller.window?.tabGroup?.isTabBarVisible != true { controller.window?.toggleTabBar(nil) }
+        remote.connect(secret: secret, remember: remember)
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if controllers.isEmpty { createWindow() } else { mainWindow?.makeKeyAndOrderFront(nil) }
         return true
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if let remote = remoteControllers.values.first(where: { $0.model.busy }) {
+            remote.window?.makeKeyAndOrderFront(nil)
+            remote.model.status = "A remote operation is running. Cancel it and wait before quitting."
+            return .terminateCancel
+        }
         if workspace.jobs.busy {
             let owner = workspace.jobs.owner ?? model
             owner.window?.makeKeyAndOrderFront(nil); owner.showingOperations = true
@@ -126,7 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         for id in order {
             guard let controller = controllers[id], let window = controller.window else { continue }
             let group = window.tabGroup?.windows ?? [window]
-            let groupID = (group.first?.windowController as? BrowserWindowController)?.model.id ?? id
+            let groupID = group.compactMap { ($0.windowController as? BrowserWindowController)?.model.id }.first ?? id
             for tab in group {
                 guard let controller = tab.windowController as? BrowserWindowController, !visited.contains(controller.model.id) else { continue }
                 visited.insert(controller.model.id)
@@ -146,10 +176,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
     private func save(terminating: Bool = false) {
-        let drafts = drafts(); let shortcuts = workspace.shortcuts; let searches = workspace.savedSearches; let url = stateURL
+        let drafts = drafts(); let shortcuts = workspace.shortcuts; let searches = workspace.savedSearches; let connections = workspace.connections; let url = stateURL
         saveQueue.async { [weak self] in
             do {
-                try WorkspacePersistence.save(WorkspaceSnapshot(shortcuts: shortcuts, windows: drafts.map { $0.snapshot() }, savedSearches: searches), to: url)
+                try WorkspacePersistence.save(WorkspaceSnapshot(shortcuts: shortcuts, windows: drafts.map { $0.snapshot() }, savedSearches: searches, connections: connections), to: url)
                 if terminating { Task { @MainActor in NSApp.reply(toApplicationShouldTerminate: true) } }
             } catch {
                 let message = error.localizedDescription
@@ -174,6 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu("MacEx", [item("About MacEx", #selector(about)), item("File Access…", #selector(fileAccess)), .separator(), item("Hide MacEx", #selector(hide), "h"),
                        .separator(), item("Quit MacEx", #selector(quit), "q")])
         menu("File", [item("New Window", #selector(newWindow), "n"), item("New Tab", #selector(newTab), "t"), .separator(),
+                      item("Connect with SFTP…", #selector(connections), "k"), .separator(),
                       item("Open", #selector(openSelected), "o"), item("Open With…", #selector(openWith)),
                       item("New Folder…", #selector(newFolder), "n", [.command, .shift]), .separator(),
                       item("Rename…", #selector(rename)), item("Duplicate", #selector(duplicate), "d"),
@@ -212,6 +243,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         main.addItem(help); NSApplication.shared.mainMenu = main
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if let remote = activeRemote {
+            switch item.action {
+            case #selector(openSelected), #selector(quickLook), #selector(rename): return remote.selected != nil && remote.connected && !remote.busy
+            case #selector(newFolder), #selector(refresh): return remote.connected && !remote.busy
+            case #selector(parent): return remote.path != "/" && remote.connected && !remote.busy
+            case #selector(back): return !remote.backHistory.isEmpty && !remote.busy
+            case #selector(forward): return !remote.forwardHistory.isEmpty && !remote.busy
+            case #selector(duplicate), #selector(trash), #selector(moveHere), #selector(copyPaths), #selector(openWith),
+                 #selector(icons), #selector(list), #selector(previewPane), #selector(hidden), #selector(filterFolder),
+                 #selector(searchFolder), #selector(revealSearchParent), #selector(pinFolder), #selector(goToFolder), #selector(cleanup), #selector(operations): return false
+            default: break
+            }
+        }
         switch item.action {
         case #selector(rename): return model.selection.count == 1 && !model.busy
         case #selector(duplicate), #selector(trash): return !model.selection.isEmpty && !model.busy
@@ -231,11 +275,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         default: return true
         }
     }
-    @objc func openSelected() { model.openSelection() }
+    @objc func openSelected() { if let remote = activeRemote { remote.openSelected() } else { model.openSelection() } }
     @objc func openWith() { model.openWith() }
     @objc func newWindow() { createWindow(folder: activeController?.model.location) }
     @objc func newTab() {
-        guard let base = activeController?.window else { newWindow(); return }
+        guard let base = mainWindow else { newWindow(); return }
         let source = model
         let controller = createWindow(folder: source.location, show: false)
         controller.model.viewMode = source.viewMode; controller.model.showPreview = source.showPreview
@@ -253,14 +297,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func icons() { model.viewMode = .icons }
     @objc func list() { model.viewMode = .list }
     @objc func previewPane() { model.showPreview.toggle() }
-    @objc func quickLook() { model.quickLook?() }
+    @objc func quickLook() { if let remote = activeRemote { remote.previewSelected() } else { model.quickLook?() } }
     @objc func clearThumbnails() { Thumbnails.shared.clear() }
     @objc func fileAccess() {
         if activeController == nil { createWindow() }
         model.showFileAccess = true
     }
-    @objc func newFolder() { model.newFolder() }
-    @objc func rename() { model.rename() }
+    @objc func newFolder() { if let remote = activeRemote { remote.newFolder() } else { model.newFolder() } }
+    @objc func rename() { if let remote = activeRemote { remote.rename() } else { model.rename() } }
     @objc func duplicate() { model.duplicate() }
     @objc func trash() { model.trash() }
     @objc func moveHere() { model.paste(move: true) }
@@ -271,21 +315,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if activeController == nil { createWindow() }
         model.showSearch = true
     }
+    @objc func connections() {
+        if let remote = activeRemote { remote.showConnections = true }
+        else { if activeController == nil { createWindow() }; model.connectionDraft = nil; model.showConnections = true }
+    }
     @objc func revealSearchParent() { model.revealInEnclosingFolder() }
     @objc func changeAppearance(_ sender: NSMenuItem) {
         let value = sender.representedObject as? String ?? "system"
         UserDefaults.standard.set(value, forKey: "appearance")
         NSApplication.shared.appearance = value == "system" ? nil : NSAppearance(named: value == "light" ? .aqua : .darkAqua)
     }
-    @objc func refresh() { model.reload() }
+    @objc func refresh() { if let remote = activeRemote { remote.refresh() } else { model.reload() } }
     @objc func cleanup() {
         if activeController == nil { createWindow() }
         model.showCleanup = true
     }
     @objc func operations() { model.showingOperations.toggle() }
-    @objc func back() { model.back() }
-    @objc func forward() { model.forward() }
-    @objc func parent() { model.parent() }
+    @objc func back() { if let remote = activeRemote { remote.back() } else { model.back() } }
+    @objc func forward() { if let remote = activeRemote { remote.forward() } else { model.forward() } }
+    @objc func parent() { if let remote = activeRemote { remote.parent() } else { model.parent() } }
     @objc func goToFolder() { model.goToFolder() }
     @objc func closeWindow() { mainWindow?.performClose(nil) }
     @objc func quit() { NSApplication.shared.terminate(nil) }

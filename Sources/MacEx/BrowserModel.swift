@@ -40,6 +40,8 @@ final class BrowserModel: ObservableObject {
     var jobAction: FileAction? { workspace.jobs.action }
     var summary: JobSummary? { workspace.jobs.summary }
     @Published var showingOperations = false
+    @Published var showConnections = false
+    @Published var connectionDraft: SFTPConnection?
     @Published var showCleanup = false
     @Published var showSearch = false
     @Published var searchFields = SearchFields()
@@ -61,6 +63,7 @@ final class BrowserModel: ObservableObject {
     private let spotlight = SpotlightRunner()
     private var volumeObservers: VolumeObservers?
     private var subscriptions: Set<AnyCancellable> = []
+    var browserLocation: BrowserLocation { .local(location) }
     var busy: Bool { workspace.jobs.busy }
     var selected: [FileEntry] { entries.filter { selection.contains($0.url) } }
     var breadcrumbs: [URL] {

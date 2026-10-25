@@ -1,6 +1,6 @@
 # MacEx roadmap
 
-The approved baseline is direct distribution, macOS 14+, Intel and Apple silicon, and local daily use before advanced features. P1 through P4 implementation are authorized. P5 onward still needs authorization. Each phase must remain runnable and independently verified.
+The approved baseline is direct distribution, macOS 14+, Intel and Apple silicon, and local daily use before advanced features. P1 through P5 implementation are authorized. Later work follows the roadmap after P5 verification. Distribution is open source through GitHub, without an Apple Developer Program requirement. Developer ID signing and notarization are deferred optional work, not blockers for GitHub previews. Each phase must remain runnable and independently verified.
 
 ## P1 — Local list-view milestone
 
@@ -10,11 +10,11 @@ Gate: real filesystem fixture tests, real native UI checks, a runnable developme
 
 ## P2 — Daily-use polish / first release
 
-Implementation status: local features, universal development app/DMG, Xcode UI-test host, and release scripts are present in 0.2.1. This is not yet a verified public release. Native drag/Finder gestures, the full accessibility audit, Xcode test execution, Intel/macOS 14 runtime checks, and Developer ID/notarization remain release gates. See the P2 verification report for exact evidence.
+Implementation status: local features, universal development app/DMG, Xcode UI-test host, and release scripts are present in 0.2.1. This is not yet a verified public release. Native drag/Finder gestures, the full accessibility audit, Xcode test execution, Intel/macOS 14 runtime checks remain quality-verification tasks. Developer ID/notarization are deferred optional distribution improvements. See the P2 verification report for exact evidence.
 
 Add virtualized icon view, tabs and multiple windows, Open With, drag/drop with visible copy/move intent, Quick Look Space preview and optional pane, bounded thumbnails, customizable pinned sidebar, resilient bookmark persistence, state restoration, and complete keyboard/VoiceOver audit. Add the Xcode UI-test host around the existing service package.
 
-Gate: keyboard-only workflows, Finder interop, supported preview formats, memory/cache budgets, light/dark modes, unavailable bookmarks, and independent window/tab histories. Establish Developer ID, hardened runtime, universal release packaging, notarization, stapling, and minimum-OS/Intel runtime testing before public distribution.
+Gate: keyboard-only workflows, Finder interop, supported preview formats, memory/cache budgets, light/dark modes, unavailable bookmarks, and independent window/tab histories. Use universal ad-hoc signed GitHub preview packages with hardened runtime and checksums. Keep minimum-OS/Intel runtime checks visible. Developer ID, notarization, and stapling are optional future distribution improvements.
 
 ## P3 — Conventional search
 
@@ -35,6 +35,8 @@ Dashboard includes large files (editable 1 GiB default), old Downloads (editable
 Gate: false-positive hash/name fixtures, hard-link accounting, changed/vanished retained copies, overlapping roots, permission failures, protected-location exclusions, review and Trash behavior.
 
 ## P5 — Secure SFTP
+
+Implementation status: implemented in 0.5.0. Saved connections, host-key trust before authentication, explicit Keychain storage, RSA/Ed25519/encrypted-key/password/agent login, identifiable remote tabs, browse/metadata, safe mkdir/rename, exclusive-create transfers, cancellation/deadlines, and bounded downloaded previews are present. Bundled universal static dependencies, notices, source pins, a bounded-agent patch, rebuild instructions, and security-update guidance are included. Real loopback SSH/SFTP fixtures and native end-to-end evidence are in `docs/P5-VERIFICATION.md`. Independent security audit and wider server/platform compatibility remain unclaimed. GitHub previews do not require notarization.
 
 Introduce a narrow local/remote location and capabilities interface. Bundle audited pinned libssh2 (BSD-3-Clause) and OpenSSL 3.x (Apache-2.0) for both architectures with notices, reproducible build inputs, and a security-update process. No Homebrew runtime requirement.
 

@@ -6,13 +6,13 @@
     <key>CFBundleIdentifier</key><string>local.macex.app</string>
     <key>CFBundleExecutable</key><string>MacEx</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.4.0</string>
-    <key>CFBundleVersion</key><string>5</string>
+    <key>CFBundleShortVersionString</key><string>0.5.0</string>
+    <key>CFBundleVersion</key><string>6</string>
     <key>CFBundleIconFile</key><string>MacEx</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSHumanReadableCopyright</key><string>MacEx development preview</string>
+    <key>NSHumanReadableCopyright</key><string>MacEx contributors · MIT License</string>
     <key>NSDesktopFolderUsageDescription</key><string>MacEx browses and manages files in Desktop when you open that location.</string>
     <key>NSDocumentsFolderUsageDescription</key><string>MacEx browses and manages files in Documents when you open that location.</string>
     <key>NSDownloadsFolderUsageDescription</key><string>MacEx browses and manages files in Downloads when you open that location.</string>

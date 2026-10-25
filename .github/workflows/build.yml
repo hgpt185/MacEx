@@ -1,0 +1,35 @@
+name: Build and verify preview
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Test services and disposable SFTP server
+        run: zsh Scripts/test-sftp.sh
+      - name: Prepare universal GitHub preview without notarization
+        run: zsh Scripts/package-release.sh --prepare
+      - name: Verify bundle and download checksums
+        run: |
+          codesign --verify --strict --verbose=2 dist/release/MacEx.app
+          lipo -verify_arch arm64 x86_64 dist/release/MacEx.app/Contents/MacOS/MacEx
+          cd dist
+          shasum -a 256 -c MacEx-*-SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: MacEx-preview
+          path: |
+            dist/MacEx-*.dmg
+            dist/MacEx-*.zip
+            dist/MacEx-*-SHA256SUMS.txt
+          retention-days: 14

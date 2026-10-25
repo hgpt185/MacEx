@@ -6,6 +6,9 @@ import MacExCore
 final class AppWorkspace: ObservableObject {
     @Published var shortcuts: [SidebarShortcut] { didSet { changed?() } }
     @Published var savedSearches: [SavedSearch] = [] { didSet { changed?() } }
+    @Published var connections: [SFTPConnection] = [] { didSet { changed?() } }
+    var openRemote: ((SFTPConnection, String, Bool) -> Void)?
+    var knownHosts: SSHKnownHosts?
     var changed: (() -> Void)?
     let jobs = SharedJobs()
     let cleanup = CleanupModel()
@@ -17,6 +20,13 @@ final class AppWorkspace: ObservableObject {
                         ("Movies", "film", home.appendingPathComponent("Movies"))]
         shortcuts = defaults.map { SidebarShortcut(title: $0.0, symbol: $0.1, folder: FolderBookmark(path: $0.2.path)) }
     }
+    func saveConnection(_ connection: SFTPConnection) throws {
+        let connection = try connection.validated()
+        guard connections.count < 100 || connections.contains(where: { $0.id == connection.id }) else { throw FileFailure.message("At most 100 saved connections are supported.") }
+        if let index = connections.firstIndex(where: { $0.id == connection.id }) { connections[index] = connection }
+        else { connections.append(connection) }
+    }
+    func removeConnection(_ id: UUID) { connections.removeAll { $0.id == id } }
     func pin(_ url: URL) {
         guard shortcuts.count < 200 else { return }
         if shortcuts.contains(where: { $0.folder.path == url.path }) { return }

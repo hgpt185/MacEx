@@ -26,6 +26,9 @@ struct BrowserView: View {
         .tint(Color(red: 0.13, green: 0.43, blue: 0.86))
         .sheet(isPresented: $model.showFileAccess) { FileAccessView() }
         .sheet(isPresented: $model.showCleanup) { CleanupSheet(browser: model, model: model.workspace.cleanup) }
+        .sheet(isPresented: $model.showConnections) {
+            if let knownHosts = model.workspace.knownHosts { ConnectionSheet(workspace: model.workspace, knownHosts: knownHosts, initial: model.connectionDraft) }
+        }
         .sheet(isPresented: $model.showSearch) { SearchSheet(model: model) }
         .onExitCommand { if !model.filter.isEmpty { model.filter = "" } }
     }
@@ -93,6 +96,18 @@ struct BrowserView: View {
                                 }
                         }
                     }
+                    sidebarLabel("Servers").padding(.top, 23)
+                    ForEach(model.workspace.connections) { connection in
+                        Button {
+                            model.connectionDraft = connection; model.showConnections = true
+                        } label: {
+                            Label(connection.title.isEmpty ? connection.identity : connection.title, systemImage: "network")
+                                .frame(maxWidth: .infinity, alignment: .leading).lineLimit(1)
+                        }.buttonStyle(.plain).font(.system(size: 12)).padding(.horizontal, 12).padding(.vertical, 6)
+                    }
+                    Button { model.connectionDraft = nil; model.showConnections = true } label: {
+                        Label("Connect with SFTP…", systemImage: "plus.circle").frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(.plain).font(.system(size: 12)).padding(.horizontal, 12).padding(.vertical, 8)
                     sidebarLabel("Tools").padding(.top, 23)
                     Button { model.showCleanup = true } label: {
                         Label("Cleanup Review", systemImage: "externaldrive.badge.magnifyingglass").frame(maxWidth: .infinity, alignment: .leading)

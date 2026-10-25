@@ -1,5 +1,7 @@
 # P4 verification — 0.4.0 — 2026-10-26
 
+Distribution policy update in 0.5.0: open-source GitHub previews use ad-hoc signing; Developer ID/notarization are deferred optional work. The evidence below records the earlier checkpoint.
+
 ## Result
 
 Selected-root duplicate and cleanup review is implemented. The native dashboard offers verified duplicates, large files (editable 1 GiB default), old Downloads (editable 90-day modification age), and empty regular files with explanations. No scan starts automatically. All cleanup selections start empty; duplicate groups require an explicit retained copy. A separate review lists selected/retained paths and logical/estimated allocated bytes before Trash.

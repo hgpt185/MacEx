@@ -1,5 +1,7 @@
 # P3 verification — 0.3.0 — 2026-10-26
 
+Distribution policy update in 0.5.0: open-source GitHub previews use ad-hoc signing; Developer ID/notarization are deferred optional work. The evidence below records the earlier checkpoint.
+
 ## Result
 
 Conventional folder search is implemented. Spotlight is the first source and is scoped to the selected folder. A folder scan runs only when requested. An empty Spotlight result stays unverified: it is not reported as proof that nothing matches.

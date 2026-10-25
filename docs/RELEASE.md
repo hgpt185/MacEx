@@ -1,24 +1,41 @@
-# P2 build and release workflow
+# GitHub build and distribution
 
-## Local development artifact
+MacEx is open source under MIT, with third-party notices for bundled SSH libraries. Distribution uses GitHub source and preview downloads. There is no Apple Developer Program membership, Developer ID identity, or notarization requirement for this workflow. The app is ad-hoc signed; notarization is deferred optional work.
+
+## Prepare downloads
 
 ```sh
 zsh Scripts/package-release.sh --prepare
 ```
 
-This builds both architectures and produces:
+This builds arm64 and x86_64 binaries for macOS 14+ and produces:
 
-- `dist/MacEx.app`: universal ad-hoc signed development app.
-- `dist/release/MacEx.app`: universal ad-hoc signed app with hardened runtime.
-- `dist/MacEx-0.4.0.dmg`: local development disk image containing that app.
+- `dist/MacEx.app`: universal ad-hoc signed app.
+- `dist/release/MacEx.app`: the same app with hardened runtime.
+- `dist/MacEx-0.5.0.dmg` and `dist/MacEx-0.5.0.zip`: download packages.
+- `dist/MacEx-0.5.0-SHA256SUMS.txt`: SHA-256 checksums for both packages.
 
-The prepared disk image is not notarized or suitable for a public release. The normal app needs no account, backend, paid AI service, or API key.
+Versioned filenames follow `Resources/Info.plist`. License and dependency notices are included inside the app. Bundled static SSH libraries have no Homebrew runtime dependency. To rebuild those libraries from verified source pins, run `python3 Scripts/build-ssh-dependencies.py`; see `Vendor/README.md`.
 
-## Developer ID release
+Create a GitHub preview release only after tests, native checks, and artifact checks pass:
 
-Public distribution requires the developer's Apple Developer Program access, an installed **Developer ID Application** signing identity, and a `notarytool` Keychain profile. No credentials are stored in this repository. During P2 verification, `security find-identity -v -p codesigning` reported zero valid identities; therefore the signed/notarized branch was not run.
+```sh
+gh release create v0.5.0 \
+  dist/MacEx-0.5.0.dmg \
+  dist/MacEx-0.5.0.zip \
+  dist/MacEx-0.5.0-SHA256SUMS.txt \
+  --title 'MacEx 0.5.0 preview' --prerelease --notes-file docs/RELEASE-NOTES-0.5.0.md
+```
 
-After configuring those prerequisites locally, run:
+Downloads are public only when the repository/release is public. Preview notes must identify remaining compatibility/quality limits and the ad-hoc/not-notarized status. Do not describe ad-hoc signature verification as an Apple trust assessment.
+
+## Opening a downloaded preview
+
+Download from this repository's Releases page and compare checksums before opening. Copy MacEx into Applications. Because the app is not notarized, macOS may initially block opening it. Follow [Apple's per-app opening instructions](https://support.apple.com/en-us/102445) in Privacy & Security → Open Anyway only for a download whose source and integrity you have verified. Do not disable Gatekeeper globally, remove quarantine recursively, or use an arbitrary third-party signing workaround. Source builds remain available for users who prefer to compile the app themselves.
+
+## Optional future Apple signing
+
+`--sign-and-notarize` remains available for a future Developer ID release. It is not run by the GitHub preview workflow and is not a current release blocker. It requires a Developer ID Application identity and a local `notarytool` Keychain profile:
 
 ```sh
 MACEX_DEVELOPER_ID='Developer ID Application: YOUR NAME (TEAMID)' \
@@ -26,34 +43,24 @@ MACEX_NOTARY_PROFILE='your-existing-keychain-profile' \
 zsh Scripts/package-release.sh --sign-and-notarize
 ```
 
-The script signs the universal app with hardened runtime and timestamp, notarizes a ZIP, staples/validates the app, creates/signs the DMG, notarizes/staples/validates it, and performs Gatekeeper assessments. This branch uploads the app/image to Apple's notary service. It does not publish a website or upload a public download. Do not run it merely to prepare a local preview.
-
-No App Sandbox, Full Disk Access entitlement, privileged helper, unsigned-code exception, or JIT exception is requested. Regular filesystem and macOS privacy restrictions still apply.
+That optional branch uploads app/image archives to Apple's notary service. No signing credentials belong in the repository. No App Sandbox exception, privileged helper, JIT entitlement, or permission bypass is requested.
 
 ## Xcode UI-test host
 
-Open `MacEx.xcodeproj`, choose the shared **MacEx** scheme, and run tests with a full Xcode installation supporting Swift 6:
+With full Xcode and Swift 6, run:
 
 ```sh
 xcodebuild -project MacEx.xcodeproj -scheme MacEx -destination 'platform=macOS' test
 ```
 
-The Xcode app is a thin host using the local `MacExCore` package. Its identifier is `local.macex.app.uihost`; its display name is **MacEx UI Host**. The separate identifier and per-test state directory prevent tests from terminating the ordinary MacEx app or replacing its workspace preferences. Tests create their own UUID fixture roots and do not use personal files.
-
-The project is generated from current app sources by:
+The thin host uses `MacExCore`, identifier `local.macex.app.uihost`, and test-created workspace directories. It does not terminate the normal MacEx session. Regenerate the checked-in host after app source or Info.plist changes:
 
 ```sh
 python3 Scripts/generate-xcode-project.py
 ```
 
-Regenerate after adding/removing app source files or changing the production Info.plist. The generated project and UIHost Info.plist are included in the source tree. The host has local ad-hoc signing defaults and does not embed the generated production icon; the CLI development/release bundle does.
+The development machine has Command Line Tools only. Full Xcode suite execution remains unverified here.
 
-The development environment has Command Line Tools only. The project/property lists and scheme XML were inspected for syntax, but the Xcode host and UI tests could not be compiled or executed here. Full Xcode execution remains a release gate.
+## Quality work tracked independently of notarization
 
-## Public-release gates
-
-- Run the Xcode UI suite and manual drag/drop checks between list/grid views, windows, tabs, and Finder; include cancellation, collisions, failed sources, and modifier-key changes.
-- Complete VoiceOver speech, keyboard-focus, high-contrast, reduced-motion, and light/dark audits.
-- Run on Intel and macOS 14. Verify cloud placeholders, unavailable volumes, TCC revocation, and slow/network I/O.
-- Measure cold launch, UI input latency, peak memory, idle CPU, and energy with Instruments on representative hardware.
-- Complete Developer ID/notarization/Gatekeeper validation on the exact release artifact. Do not infer these from successful ad-hoc signature verification.
+Keep native drag/Finder interoperability, VoiceOver/keyboard/high-contrast/reduced-motion audits, Intel/macOS 14 runtime, provider/network-volume/TCC-revocation checks, and sustained resource profiling visible in preview notes. These affect release confidence; an Apple signing certificate would not verify them.

@@ -1,5 +1,7 @@
 # P2 verification — 0.2.0 — 2026-10-25
 
+Distribution policy update in 0.5.0: open-source GitHub previews use ad-hoc signing; Developer ID/notarization are deferred optional work. The evidence below records the earlier checkpoint.
+
 ## Result
 
 P2's local features and development artifacts are implemented. This is a development preview, with explicit public-release gates still open. P3 search, P4 cleanup, P5 SFTP, and P6 OCR/natural-language filters are not implemented.

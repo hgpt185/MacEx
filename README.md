@@ -1,6 +1,6 @@
 # MacEx
 
-A standalone native macOS file manager. Version **0.4.0** carries P1–P4: local browsing, daily-use polish, conventional folder search, and reviewed cleanup. MacEx coexists with Finder; it does not replace the desktop or system file dialogs. Public-release verification remains incomplete.
+A standalone native macOS file manager. Version **0.5.0** carries P1–P5: local browsing, daily-use polish, conventional folder search, reviewed cleanup, and secure SFTP. MacEx coexists with Finder; it does not replace the desktop or system file dialogs. GitHub previews are ad-hoc signed and not notarized; remaining compatibility and quality checks are documented.
 
 ## Build and run
 
@@ -20,7 +20,7 @@ Create an optimized universal development app:
 zsh Scripts/build-app.sh release --universal
 ```
 
-The build script generates the original white/blue folder-passage icon and ad-hoc signs the bundle. This is a **local development preview**, not a Developer ID signed or notarized release. Do not distribute it as a finished product. Building does not install the app, change Finder defaults, or create a login item.
+The build script generates the original white/blue folder-passage icon and ad-hoc signs the bundle. This is an **open-source preview for GitHub distribution**, with ad-hoc signing and no notarization. An Apple Developer Program account is not required. Building does not install the app, change Finder defaults, or create a login item.
 
 To start from a specific folder when launching directly:
 
@@ -35,7 +35,7 @@ dist/MacEx.app/Contents/MacOS/MacEx --folder /absolute/folder/path
 - Default-application opening, folder creation, rename, duplicate, copy, same-volume move, verified cross-volume move, and Trash.
 - Native menus, context menus, keyboard shortcuts, operation feedback, cooperative cancellation, conflict decisions, and permission errors.
 - Event-driven refresh for the current folder, bounded directory workers, progressive metadata batches, and native light/dark appearance.
-- No network requests, external dependencies, accounts, telemetry, AI services, or content index.
+- Local workflows need no network, accounts, telemetry, AI services, or content index. Optional SFTP uses bundled SSH libraries and connects only when requested.
 
 File filtering searches names in the current folder only. It is not recursive or content search.
 
@@ -79,11 +79,28 @@ All deletion selections start empty. Choose a retained copy for each duplicate g
 
 Allocated space is an estimate: APFS clones, snapshots, compression, hard links, and open files affect physical storage. Moving to Trash retains the data until Trash is emptied in Finder. Live writers cannot be universally frozen by file coordination; see [P4 verification](docs/P4-VERIFICATION.md) for bounds and limitations.
 
+## Secure SFTP
+
+Use **File → Connect with SFTP…** (`⌘K`) or the sidebar's Servers section. Enter host, port, username, and an absolute initial path. Authentication supports an existing `SSH_AUTH_SOCK` agent, a chosen RSA/Ed25519 private key (including supported encrypted PEM/OpenSSH keys), or a password. No SSH agent forwarding is enabled. Connection details can be saved; secrets are saved only through the explicit Keychain option after successful authentication. **Load from Keychain** and **Remove from Keychain** are explicit actions. Workspace files never contain passwords or passphrases. Keychain items are bound to server, port, username, authentication method, and selected key; editing those fields clears the form secret.
+
+MacEx checks the server key before sending credentials. Unknown keys show their SHA-256 fingerprint and require **Trust and Connect**, with Cancel as the default. Verify the fingerprint independently. Changed keys block authentication, show the saved/received fingerprints, and offer no inline trust override. **Connections → Review Saved Host Key** provides separate pin review/removal before another connection. Host/port pins are stored in app-owned `ssh-known-hosts.json`, separate from the system's SSH configuration.
+
+Remote tabs always identify the server and remote path. They support browsing, metadata, per-tab history/name filtering, non-overwriting folder creation/rename, single regular-file upload/download, progress, and cancellation. Transfer destinations use exclusive creation; existing paths are never silently replaced. New partial files remain at the chosen paths when transfers fail/cancel, and the UI identifies the operation/destination for review. Reconnect after a failed/cancelled operation. Recursive transfers, remote Trash/cleanup, terminals, background edit synchronization, jump hosts, and file promises are outside P5.
+
+**Open / Preview** on a regular remote file explicitly asks to download up to **32 MiB** into a private temporary folder. Closing the preview removes the temporary copy; no remote editing/upload synchronization occurs. Links and special files are not followed for these transfers. Downloads check metadata before/after streaming; a changing remote filesystem is not a transactional snapshot. Local source changes during upload stop the transfer and retain the source. Native SFTP servers that reject safe rename semantics report an error rather than falling back to replacement.
+
+Bundled static libssh2/OpenSSL libraries support both architectures, without a Homebrew runtime requirement. Source pins, the bounded-agent patch, build instructions, notices, and the security-update process are in [Vendor/README.md](Vendor/README.md). See [P5 verification](docs/P5-VERIFICATION.md) for tested cases and limits. Remote sessions are not reconnected automatically when the app relaunches.
+
+## GitHub downloads and license
+
+MacEx's own code uses the [MIT License](LICENSE). Bundled SSH libraries retain their own licenses and notices. GitHub preview downloads include a DMG, ZIP, and SHA-256 checksums; see [distribution instructions](docs/RELEASE.md). Developer ID signing and notarization are optional future work, not current preview blockers. macOS may block a downloaded, non-notarized app initially; follow the documented per-app opening flow only after checking its source and integrity.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
 |---|---|
 | `⌘N` / `⌘T` | New window / tab |
+| `⌘K` | Connect with SFTP |
 | `⌘W` | Close current tab / window |
 | `Control-Tab` / `Control-Shift-Tab` | Next / previous tab |
 | `⌘1` / `⌘2` | Icon / list view |
@@ -128,7 +145,7 @@ File coordination does not freeze uncooperative writers. A changing filesystem c
 - A process crash or forced termination can leave staging directories. There is no automatic recovery or automatic deletion of abandoned staging data. Review such paths manually.
 - Directory events refresh membership. Some in-place child-file edits may require `⌘R` to refresh metadata until richer event tracking is added.
 - File promises (for example, dragging a not-yet-downloaded attachment from another app) are not supported; drag actual files instead. Sidebar drag targets reorder shortcuts rather than transfer files.
-- No file-operation Undo, OCR, or SFTP yet. Folder search and reviewed cleanup are implemented. Later phases remain in [ROADMAP.md](ROADMAP.md).
+- No file-operation Undo or OCR yet. Folder search, reviewed cleanup, and secure SFTP are implemented. Later phases remain in [ROADMAP.md](ROADMAP.md).
 
 MacEx runs without App Sandbox in this preview, under your normal macOS account permissions. It does not elevate privileges or bypass SIP, ACLs, or privacy settings. Desktop/Documents/Downloads and volume privacy prompts occur only when those locations are accessed. Full Disk Access is not required for ordinary use. Users can optionally grant it in System Settings → Privacy & Security → Full Disk Access to cover the Files and Folders privacy checks with a broader grant. Installation cannot grant this automatically. Permission choices are managed by macOS; Developer ID releases need a stable signing identity so updates can be recognized as the same app. Ad-hoc development rebuilds can cause repeat prompts. Full Disk Access does not bypass other protections or App Sandbox restrictions. Hidden-file and appearance preferences use `UserDefaults`; the app does not persist file contents or credentials.
 
@@ -148,7 +165,9 @@ MACEX_TEST_VOLUME=/absolute/path/to/disposable/mount zsh Scripts/test.sh
 
 That test creates/removes only its own UUID directory on that volume. It skips when the variable is absent. Do not point it at a personal folder and mistake a same-volume result for cross-volume verification.
 
-See [P4 verification](docs/P4-VERIFICATION.md) and [P3 verification](docs/P3-VERIFICATION.md) for current phase evidence. [P2 verification](docs/P2-VERIFICATION.md) records the existing public-release gaps. The original P1 report remains in [docs/VERIFICATION.md](docs/VERIFICATION.md).
+Run `zsh Scripts/test-sftp.sh` for the complete SFTP suite against disposable loopback servers, fixture keys, and a private test agent. This optional test setup installs Python test dependencies under `.build`; none are shipped or used by the app.
+
+See [P5 verification](docs/P5-VERIFICATION.md), [P4 verification](docs/P4-VERIFICATION.md) and [P3 verification](docs/P3-VERIFICATION.md) for current phase evidence. [P2 verification](docs/P2-VERIFICATION.md) records the existing public-release gaps. The original P1 report remains in [docs/VERIFICATION.md](docs/VERIFICATION.md).
 
 ## Structure
 

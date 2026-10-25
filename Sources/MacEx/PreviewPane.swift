@@ -68,7 +68,7 @@ struct PreviewPane: View {
     }
 }
 
-private struct SystemPreview: NSViewRepresentable {
+struct SystemPreview: NSViewRepresentable {
     let url: URL
     func makeNSView(context: Context) -> QLPreviewView {
         let view = QLPreviewView(frame: .zero, style: .normal)!

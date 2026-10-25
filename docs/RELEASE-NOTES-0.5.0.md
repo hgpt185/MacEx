@@ -1,0 +1,9 @@
+MacEx 0.5.0 adds secure SFTP to the native macOS file manager: saved connections, host-key verification before authentication, password/RSA/Ed25519/encrypted-key/agent login, identifiable remote tabs, browsing/metadata, non-overwriting folder creation/rename, upload/download, cancellation, and explicit bounded previews. Optional secrets use Keychain; workspace files never contain passwords or passphrases. Local search and reviewed duplicate cleanup remain available.
+
+MacEx's own code is MIT licensed. SSH libraries are bundled for Apple silicon and Intel with dependency licenses and source pins, so users need no Homebrew installation. Download the DMG or ZIP and verify it against the included SHA-256 sums.
+
+This is an early preview for macOS 14+. It is ad-hoc signed with hardened runtime and is **not notarized**. No Apple Developer Program account was used. macOS may initially block opening it; see the repository's documented per-app opening instructions after verifying the download's source/integrity.
+
+Validation: 57 tests passed and one optional cross-volume fixture was skipped; all nine SFTP integration tests also passed AddressSanitizer. Native checks covered trust-before-authentication, changed-key blocking, browse/metadata, folder creation/rename, exact upload/download bytes, bounded previews, and independent local/remote tabs. Full Xcode UI tests, Intel/macOS 14 runtime, complete accessibility audits, wider server/provider compatibility, independent security review, and prolonged resource profiling remain unverified. Keychain APIs are implemented; a native end-to-end Keychain persistence test is not claimed.
+
+Transfers create new paths only. Partial uploads/downloads remain for review after failures; originals and existing destination files are retained. No terminal, remote Trash/cleanup, recursive transfers, jump hosts, or background edit synchronization is included. Remote sessions do not reconnect automatically after relaunch.

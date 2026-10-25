@@ -1,0 +1,5 @@
+module SSHDependencies {
+  header "libssh2.h"
+  header "libssh2_sftp.h"
+  export *
+}
