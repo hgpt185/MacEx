@@ -16,7 +16,7 @@ private func withWorkspaceFixture(_ body: (URL) throws -> Void) throws {
         try FileManager.default.createDirectory(at: second, withIntermediateDirectories: false)
         let group = UUID()
         let snapshot = WorkspaceSnapshot(shortcuts: [SidebarShortcut(title: "My Work", url: first)], windows: [
-            WindowSnapshot(id: UUID(), group: group, selected: false, frame: "{{0, 0}, {1180, 760}}", browser: BrowserSnapshot(location: first, back: [root], viewMode: .icons, preview: true)),
+            WindowSnapshot(id: UUID(), group: group, selected: false, frame: "{{0, 0}, {1180, 760}}", browser: BrowserSnapshot(location: first, back: [root], viewMode: .icons, foldersFirst: true, preview: true)),
             WindowSnapshot(id: UUID(), group: group, selected: true, frame: "{{0, 0}, {1180, 760}}", browser: BrowserSnapshot(location: second, filter: "notes"))
         ])
         let url = root.appendingPathComponent("state/workspace.json")
@@ -27,6 +27,8 @@ private func withWorkspaceFixture(_ body: (URL) throws -> Void) throws {
         #expect(try FileIdentity(restored.windows[0].browser.location.resolve().url) == FileIdentity(first))
         #expect(restored.windows[0].browser.viewMode == .icons)
         #expect(restored.windows[0].browser.preview)
+        #expect(restored.windows[0].browser.foldersFirst)
+        #expect(!restored.windows[1].browser.foldersFirst)
         #expect(restored.windows[1].browser.filter == "notes")
         #expect(restored.windows[1].selected)
         #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int == 0o600)
@@ -98,5 +100,44 @@ private func withWorkspaceFixture(_ body: (URL) throws -> Void) throws {
         let link = root.appendingPathComponent("link")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: text)
         #expect(throws: (any Error).self) { try BoundedTextReader.read(link) }
+    }
+}
+
+@Test func olderWorkspaceDefaultsToMixedSorting() throws {
+    try withWorkspaceFixture { root in
+        let original = BrowserSnapshot(location: root, foldersFirst: true)
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        json.removeValue(forKey: "foldersFirst")
+        let restored = try JSONDecoder().decode(BrowserSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(!restored.foldersFirst)
+        #expect(restored.sort == FileSort.name.rawValue)
+    }
+}
+
+@Test func sortingIncludesFoldersAndKeepsUnknownSizesLast() throws {
+    try withWorkspaceFixture { root in
+        let names = ["B folder", "D folder", "A.txt", "C.txt"]
+        for (index, name) in names.enumerated() {
+            let url = root.appendingPathComponent(name)
+            if index < 2 { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false) }
+            else { try Data(repeating: 65, count: index).write(to: url) }
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(1000 + index * 100))], ofItemAtPath: url.path)
+        }
+        let entries = try names.map { try FileEntry(url: root.appendingPathComponent($0)) }
+        func sorted(_ by: FileSort, _ ascending: Bool = true, foldersFirst: Bool = false) -> [String] {
+            DirectoryReader.sorted(entries, by: by, ascending: ascending, foldersFirst: foldersFirst).map(\.name)
+        }
+        #expect(sorted(.name) == ["A.txt", "B folder", "C.txt", "D folder"])
+        #expect(sorted(.name, false) == ["D folder", "C.txt", "B folder", "A.txt"])
+        #expect(sorted(.modified) == names)
+        #expect(sorted(.modified, false) == Array(names.reversed()))
+        #expect(sorted(.size) == ["A.txt", "C.txt", "B folder", "D folder"])
+        #expect(sorted(.size, false) == ["C.txt", "A.txt", "D folder", "B folder"])
+        #expect(sorted(.name, foldersFirst: true) == ["B folder", "D folder", "A.txt", "C.txt"])
+        #expect(sorted(.name, false, foldersFirst: true) == ["D folder", "B folder", "C.txt", "A.txt"])
+        // All folders have the same Kind; ties use their names in the chosen direction.
+        let folders = entries.filter(\.isFolder)
+        #expect(DirectoryReader.sorted(folders, by: .kind, ascending: true).map(\.name) == ["B folder", "D folder"])
+        #expect(DirectoryReader.sorted(folders, by: .kind, ascending: false).map(\.name) == ["D folder", "B folder"])
     }
 }

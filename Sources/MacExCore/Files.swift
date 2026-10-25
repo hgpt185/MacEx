@@ -113,9 +113,11 @@ public enum DirectoryReader {
         return entries
     }
 
-    public static func sorted(_ entries: [FileEntry], by sort: FileSort, ascending: Bool, foldersFirst: Bool = true) -> [FileEntry] {
+    public static func sorted(_ entries: [FileEntry], by sort: FileSort, ascending: Bool, foldersFirst: Bool = false) -> [FileEntry] {
         entries.sorted { left, right in
             if foldersFirst && left.isFolder != right.isFolder { return left.isFolder }
+            // Folder sizes are unknown. Keep unknown values last in either direction.
+            if sort == .size, (left.size == nil) != (right.size == nil) { return left.size != nil }
             let result: ComparisonResult
             switch sort {
             case .name: result = left.name.localizedStandardCompare(right.name)

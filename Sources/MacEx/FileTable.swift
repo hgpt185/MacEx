@@ -19,12 +19,16 @@ struct FileTable: NSViewRepresentable {
         let columns: [(String, String, CGFloat)] = [("name", "Name", 310), ("modified", "Date Modified", 155), ("size", "Size", 90), ("kind", "Kind", 140)]
         for (key, title, width) in columns {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(key))
+            if key == "size" { column.headerToolTip = "Folder sizes are not calculated. Unknown sizes appear last unless Folders First is enabled." }
             column.title = title; column.width = width; column.minWidth = key == "name" ? 180 : 65
             column.sortDescriptorPrototype = NSSortDescriptor(key: key, ascending: true)
             table.addTableColumn(column)
         }
         table.target = context.coordinator; table.doubleAction = #selector(Coordinator.openClicked)
-        table.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+        context.coordinator.updating = true
+        let key = model.sort == .name ? "name" : model.sort == .modified ? "modified" : model.sort == .size ? "size" : "kind"
+        table.sortDescriptors = [NSSortDescriptor(key: key, ascending: model.ascending)]
+        context.coordinator.updating = false
         table.setAccessibilityLabel("Files in current folder")
         table.setAccessibilityIdentifier("file-list")
         table.registerForDraggedTypes([.fileURL])
@@ -48,7 +52,9 @@ struct FileTable: NSViewRepresentable {
         }
         let key = model.sort == .name ? "name" : model.sort == .modified ? "modified" : model.sort == .size ? "size" : "kind"
         if table.sortDescriptors.first?.key != key || table.sortDescriptors.first?.ascending != model.ascending {
+            coordinator.updating = true
             table.sortDescriptors = [NSSortDescriptor(key: key, ascending: model.ascending)]
+            coordinator.updating = false
         }
     }
 
@@ -122,7 +128,7 @@ struct FileTable: NSViewRepresentable {
                 cell.textField?.alignment = .right; cell.textField?.textColor = .secondaryLabelColor
             default: cell.textField?.stringValue = entry.kind; cell.textField?.textColor = .secondaryLabelColor
             }
-            cell.toolTip = entry.url.path
+            cell.toolTip = entry.url.path + (column.identifier.rawValue == "size" && entry.size == nil ? "\nFolder size is not calculated." : "")
             return cell
         }
         func tableViewSelectionDidChange(_ notification: Notification) {
@@ -130,9 +136,11 @@ struct FileTable: NSViewRepresentable {
             model.selection = Set(table.selectedRowIndexes.compactMap { entries.indices.contains($0) ? entries[$0].url : nil })
         }
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
-            guard let descriptor = tableView.sortDescriptors.first else { return }
+            guard !updating, let descriptor = tableView.sortDescriptors.first else { return }
             model.ascending = descriptor.ascending
             model.sort = descriptor.key == "modified" ? .modified : descriptor.key == "size" ? .size : descriptor.key == "kind" ? .kind : .name
+            entries = model.entries
+            tableView.reloadData()
         }
         @objc func openClicked() { guard let table, entries.indices.contains(table.clickedRow) else { return }; model.open(entries[table.clickedRow]) }
         @objc func openSelected() { model.openSelection() }

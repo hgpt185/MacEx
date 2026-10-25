@@ -4,29 +4,70 @@ import QuickLookUI
 import MacExCore
 
 @MainActor
-final class BrowserWindowController: NSWindowController, NSWindowDelegate, @preconcurrency QLPreviewPanelDataSource, @preconcurrency QLPreviewPanelDelegate {
+final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, @preconcurrency QLPreviewPanelDataSource, @preconcurrency QLPreviewPanelDelegate {
     let model: BrowserModel
     var onClose: (() -> Void)?
     var onChange: (() -> Void)?
     var onNewTab: (() -> Void)?
     private var controllingPreview = false
     private var previewURLs: [URL] = []
+    private var requestedTabBar = false
 
     init(model: BrowserModel) {
         self.model = model
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.minSize = NSSize(width: 900, height: 520)
-        window.titlebarAppearsTransparent = true; window.toolbarStyle = .unified
+        window.titlebarAppearsTransparent = false; window.toolbarStyle = .unified
+        window.titleVisibility = .hidden
         window.tabbingIdentifier = "MacExBrowser"; window.tabbingMode = .preferred
         super.init(window: window)
         window.delegate = self; model.window = window
         window.contentView = NSHostingView(rootView: BrowserView(model: model))
+        let toolbar = NSToolbar(identifier: "MacExBrowserToolbar")
+        toolbar.delegate = self; toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        window.toolbar = toolbar
         window.center()
         model.quickLook = { [weak self] in self?.toggleQuickLook() }
         model.previewSelectionChanged = { [weak self] in self?.refreshPreview() }
     }
     required init?(coder: NSCoder) { nil }
+    private static let browserControls = NSToolbarItem.Identifier("MacExBrowserControls")
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.browserControls] }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.browserControls] }
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard identifier == Self.browserControls else { return nil }
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = "Browser controls"
+        let view = NSHostingView(rootView: BrowserToolbar(model: model))
+        view.frame = NSRect(x: 0, y: 0, width: 1050, height: 36)
+        item.view = view
+        view.sizingOptions = []
+        NSLayoutConstraint.activate([
+            view.widthAnchor.constraint(greaterThanOrEqualToConstant: 740),
+            view.widthAnchor.constraint(lessThanOrEqualToConstant: 10000),
+            view.heightAnchor.constraint(equalToConstant: 36)
+        ])
+        return item
+    }
+    func revealTabBar() {
+        DispatchQueue.main.async { [weak self] in
+            self?.showTabBarIfNeeded()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard let self, let window = self.window, window.tabGroup?.isTabBarVisible != true else { return }
+                self.requestedTabBar = false
+                self.showTabBarIfNeeded()
+            }
+        }
+    }
+    private func showTabBarIfNeeded() {
+        guard let window, !requestedTabBar else { return }
+        requestedTabBar = true
+        NSWindow.allowsAutomaticWindowTabbing = true
+        if window.tabGroup?.isTabBarVisible != true { window.toggleTabBar(nil) }
+        model.syncTitle()
+    }
     override func newWindowForTab(_ sender: Any?) { onNewTab?() }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard sender === window else { return true }

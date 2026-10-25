@@ -42,13 +42,27 @@ public struct BrowserSnapshot: Codable, Sendable {
     public var viewMode: BrowserViewMode
     public var sort: String
     public var ascending: Bool
+    public var foldersFirst: Bool
     public var filter: String
     public var preview: Bool
     public init(location: URL, back: [URL] = [], forward: [URL] = [], viewMode: BrowserViewMode = .list,
-                sort: String = FileSort.name.rawValue, ascending: Bool = true, filter: String = "", preview: Bool = false) {
+                sort: String = FileSort.name.rawValue, ascending: Bool = true, foldersFirst: Bool = false, filter: String = "", preview: Bool = false) {
         self.location = FolderBookmark(url: location)
         self.back = back.suffix(30).map { FolderBookmark(url: $0) }; self.forward = forward.suffix(30).map { FolderBookmark(url: $0) }
-        self.viewMode = viewMode; self.sort = sort; self.ascending = ascending; self.filter = filter; self.preview = preview
+        self.viewMode = viewMode; self.sort = sort; self.ascending = ascending; self.foldersFirst = foldersFirst; self.filter = filter; self.preview = preview
+    }
+    private enum CodingKeys: String, CodingKey { case location, back, forward, viewMode, sort, ascending, foldersFirst, filter, preview }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        location = try values.decode(FolderBookmark.self, forKey: .location)
+        back = try values.decode([FolderBookmark].self, forKey: .back)
+        forward = try values.decode([FolderBookmark].self, forKey: .forward)
+        viewMode = try values.decode(BrowserViewMode.self, forKey: .viewMode)
+        sort = try values.decode(String.self, forKey: .sort)
+        ascending = try values.decode(Bool.self, forKey: .ascending)
+        foldersFirst = try values.decodeIfPresent(Bool.self, forKey: .foldersFirst) ?? false
+        filter = try values.decode(String.self, forKey: .filter)
+        preview = try values.decode(Bool.self, forKey: .preview)
     }
 }
 

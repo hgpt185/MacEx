@@ -25,6 +25,8 @@ final class BrowserModel: ObservableObject {
     @Published var selection: Set<URL> = [] { didSet { previewSelectionChanged?() } }
     @Published var filter = "" { didSet { applyFilter(); stateChanged?() } }
     @Published var sort: FileSort = .name { didSet { applyFilter(); stateChanged?() } }
+    @Published var showFileAccess = false
+    @Published var foldersFirst = false { didSet { applyFilter(); stateChanged?() } }
     @Published var ascending = true { didSet { applyFilter(); stateChanged?() } }
     @Published var showHidden = UserDefaults.standard.bool(forKey: "showHidden") {
         didSet { UserDefaults.standard.set(showHidden, forKey: "showHidden"); applyFilter() }
@@ -62,7 +64,7 @@ final class BrowserModel: ObservableObject {
         if let snapshot {
             backHistory = snapshot.back.map { $0.resolve().url }; forwardHistory = snapshot.forward.map { $0.resolve().url }
             viewMode = snapshot.viewMode; sort = FileSort(rawValue: snapshot.sort) ?? .name
-            ascending = snapshot.ascending; filter = snapshot.filter; showPreview = snapshot.preview
+            foldersFirst = snapshot.foldersFirst; ascending = snapshot.ascending; filter = snapshot.filter; showPreview = snapshot.preview
         }
         workspace.jobs.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         workspace.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
@@ -77,12 +79,14 @@ final class BrowserModel: ObservableObject {
 
     var draft: BrowserDraft {
         BrowserDraft(location: location, back: Array(backHistory.suffix(30)), forward: Array(forwardHistory.suffix(30)), mode: viewMode,
-                     sort: sort.rawValue, ascending: ascending, filter: filter, preview: showPreview)
+                     sort: sort.rawValue, ascending: ascending, foldersFirst: foldersFirst, filter: filter, preview: showPreview)
     }
     func syncTitle() {
-        window?.title = "\(location.lastPathComponent.isEmpty ? "Macintosh HD" : location.lastPathComponent) — MacEx"
+        let name = location.path == "/" || location.lastPathComponent.isEmpty ? "Macintosh HD" : location.lastPathComponent
+        window?.title = name
+        window?.tab.title = name
+        window?.tab.toolTip = location.path
         window?.representedURL = location
-        window?.tab.title = location.path == "/" ? "Macintosh HD" : location.lastPathComponent
     }
     func setVisible(_ visible: Bool) {
         guard isVisible != visible else { return }
@@ -147,7 +151,7 @@ final class BrowserModel: ObservableObject {
     private func applyFilter() {
         entries = DirectoryReader.sorted(allEntries.filter {
             (showHidden || !$0.isHidden) && (filter.isEmpty || $0.name.localizedStandardContains(filter))
-        }, by: sort, ascending: ascending)
+        }, by: sort, ascending: ascending, foldersFirst: foldersFirst)
         selection.formIntersection(Set(entries.map(\.url)))
     }
 
@@ -201,14 +205,6 @@ final class BrowserModel: ObservableObject {
     func renameShortcut(_ shortcut: SidebarShortcut) {
         prompt(title: "Rename Shortcut", message: "This changes the sidebar label only. The folder name stays the same.", initial: shortcut.title, button: "Rename") { [weak self] name in
             self?.workspace.rename(shortcut.id, title: name)
-        }
-    }
-    func chooseFolder() {
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
-        panel.prompt = "Open Folder"; panel.directoryURL = location
-        guard let window else { return }
-        panel.beginSheetModal(for: window) { [weak self] response in
-            if response == .OK, let url = panel.url { self?.navigate(url) }
         }
     }
     func goToFolder() {

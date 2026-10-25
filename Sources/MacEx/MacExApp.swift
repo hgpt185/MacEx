@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             NSApplication.shared.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
         }
         buildMenu()
-        NSWindow.allowsAutomaticWindowTabbing = false
+        NSWindow.allowsAutomaticWindowTabbing = true
         Task { [self] in
             let url = stateURL
             do {
@@ -67,7 +67,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                         else { groups[record.group] = window }
                         if record.selected { selected[record.group] = window }
                     }
-                    for (id, window) in groups { (selected[id] ?? window).makeKeyAndOrderFront(nil) }
+                    for (id, window) in groups {
+                        let shown = selected[id] ?? window
+                        shown.makeKeyAndOrderFront(nil)
+                        (shown.windowController as? BrowserWindowController)?.revealTabBar()
+                    }
                 } else { _ = createWindow(folder: initialFolder) }
             } catch {
                 canSave = false
@@ -76,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
             workspace.changed = { [weak self] in self?.scheduleSave() }
             NSApplication.shared.activate(ignoringOtherApps: true)
+            if !UserDefaults.standard.bool(forKey: "fileAccessChoiceSeen") { model.showFileAccess = true }
         }
     }
     @discardableResult
@@ -91,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         controller.onChange = { [weak self] in self?.scheduleSave() }
         model.stateChanged = { [weak self] in self?.scheduleSave() }
-        if show { controller.showWindow(nil); controller.window?.makeKeyAndOrderFront(nil) }
+        if show { controller.showWindow(nil); controller.window?.makeKeyAndOrderFront(nil); controller.revealTabBar() }
         model.syncTitle(); model.reload()
         scheduleSave()
         return controller
@@ -163,10 +168,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             let result = NSMenuItem(title: title, action: action, keyEquivalent: key)
             result.keyEquivalentModifierMask = modifiers; result.target = self; return result
         }
-        menu("MacEx", [item("About MacEx", #selector(about)), .separator(), item("Hide MacEx", #selector(hide), "h"),
+        menu("MacEx", [item("About MacEx", #selector(about)), item("File Access…", #selector(fileAccess)), .separator(), item("Hide MacEx", #selector(hide), "h"),
                        .separator(), item("Quit MacEx", #selector(quit), "q")])
         menu("File", [item("New Window", #selector(newWindow), "n"), item("New Tab", #selector(newTab), "t"), .separator(),
-                      item("Open", #selector(openSelected), "o"), item("Open With…", #selector(openWith)), item("Open Folder…", #selector(openFolder), "o", [.command, .shift]),
+                      item("Open", #selector(openSelected), "o"), item("Open With…", #selector(openWith)),
                       item("New Folder…", #selector(newFolder), "n", [.command, .shift]), .separator(),
                       item("Rename…", #selector(rename)), item("Duplicate", #selector(duplicate), "d"),
                       item("Move to Trash…", #selector(trash), "\u{8}"), .separator(),
@@ -244,7 +249,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func previewPane() { model.showPreview.toggle() }
     @objc func quickLook() { model.quickLook?() }
     @objc func clearThumbnails() { Thumbnails.shared.clear() }
-    @objc func openFolder() { model.chooseFolder() }
+    @objc func fileAccess() {
+        if activeController == nil { createWindow() }
+        model.showFileAccess = true
+    }
     @objc func newFolder() { model.newFolder() }
     @objc func rename() { model.rename() }
     @objc func duplicate() { model.duplicate() }

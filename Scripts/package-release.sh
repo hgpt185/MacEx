@@ -20,7 +20,8 @@ zsh Scripts/build-app.sh release --universal
 mkdir -p dist/release
 ditto dist/MacEx.app dist/release/MacEx.app
 bundle="$PWD/dist/release/MacEx.app"
-image="$PWD/dist/MacEx-0.2.0.dmg"
+version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$bundle/Contents/Info.plist")
+image="$PWD/dist/MacEx-$version.dmg"
 if [[ "$mode" == "--sign-and-notarize" ]]; then
     codesign --force --options runtime --timestamp --sign "$MACEX_DEVELOPER_ID" "$bundle"
     archive="$PWD/dist/MacEx-notarization.zip"

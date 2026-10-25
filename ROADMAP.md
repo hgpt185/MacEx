@@ -10,7 +10,7 @@ Gate: real filesystem fixture tests, real native UI checks, a runnable developme
 
 ## P2 — Daily-use polish / first release
 
-Implementation status: local features, universal development app/DMG, Xcode UI-test host, and release scripts are present in 0.2.0. This is not yet a verified public release. Native drag/Finder gestures, the full accessibility audit, Xcode test execution, Intel/macOS 14 runtime checks, and Developer ID/notarization remain release gates. See the P2 verification report for exact evidence.
+Implementation status: local features, universal development app/DMG, Xcode UI-test host, and release scripts are present in 0.2.1. This is not yet a verified public release. Native drag/Finder gestures, the full accessibility audit, Xcode test execution, Intel/macOS 14 runtime checks, and Developer ID/notarization remain release gates. See the P2 verification report for exact evidence.
 
 Add virtualized icon view, tabs and multiple windows, Open With, drag/drop with visible copy/move intent, Quick Look Space preview and optional pane, bounded thumbnails, customizable pinned sidebar, resilient bookmark persistence, state restoration, and complete keyboard/VoiceOver audit. Add the Xcode UI-test host around the existing service package.
 

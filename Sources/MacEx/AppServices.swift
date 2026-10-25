@@ -81,10 +81,11 @@ struct BrowserDraft: Sendable {
     var mode: BrowserViewMode
     var sort: String
     var ascending: Bool
+    var foldersFirst: Bool
     var filter: String
     var preview: Bool
     func snapshot() -> BrowserSnapshot {
-        BrowserSnapshot(location: location, back: back, forward: forward, viewMode: mode, sort: sort, ascending: ascending, filter: filter, preview: preview)
+        BrowserSnapshot(location: location, back: back, forward: forward, viewMode: mode, sort: sort, ascending: ascending, foldersFirst: foldersFirst, filter: filter, preview: preview)
     }
 }
 

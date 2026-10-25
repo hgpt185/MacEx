@@ -1,6 +1,6 @@
 # MacEx
 
-A standalone native macOS file manager. Version **0.2.0** implements P1 and the P2 local daily-use features. MacEx coexists with Finder; it does not replace the desktop or system file dialogs. Public-release verification remains incomplete.
+A standalone native macOS file manager. Version **0.2.1** carries P1 and the P2 local daily-use features. MacEx coexists with Finder; it does not replace the desktop or system file dialogs. Public-release verification remains incomplete.
 
 ## Build and run
 
@@ -58,6 +58,13 @@ Workspace data is stored in `~/Library/Application Support/MacEx/workspace.json`
 
 Testing can isolate workspace persistence by adding `--state-directory /absolute/test/state/folder` when launching directly. `--folder` overrides restored windows for that launch. The UI-test host uses a separate bundle identifier and test-created state directories to avoid terminating or changing the normal MacEx session.
 
+## P2 usability update
+
+- Browser controls sit in the native title bar with the window buttons. The current folder name is the window tab title, not a second caption. Breadcrumbs still show the path.
+- Files and folders sort together by default. Sort options include a per-tab **Folders First** preference that survives relaunch. Turn it off to sort folders by the same column as files. Name, kind, and modification-date sorting apply to folders too. Kind uses names to break ties between folders. Folder sizes remain unknown (`—`), sort after known sizes in either direction, and use names to break ties; the app does not recursively scan folders to calculate sizes.
+- Open Folder controls have been removed from the sidebar, File menu, and unavailable-folder screen. Navigate using the sidebar, breadcrumbs, opening a folder, or **Go → Go to Folder…** (`⇧⌘G`). The Open With application chooser remains a system panel.
+- A first-launch File Access guide explains that macOS cannot grant access at install. Full Disk Access is the one switch for Desktop, Documents, Downloads, and other protected locations. The guide can also raise those three system prompts in one sitting. Reopen it through **MacEx → File Access…**. It never grants permissions itself or claims to detect Full Disk Access. The Settings link is a best-effort macOS URL with a System Settings fallback and manual instructions.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -73,7 +80,6 @@ Testing can isolate workspace persistence by adding `--state-directory /absolute
 | `⌘↑` | Enclosing folder |
 | `⌘[` / `⌘]` | Back / forward |
 | `⇧⌘G` | Go to folder |
-| `⇧⌘O` | Choose a folder |
 | `⇧⌘N` | New folder |
 | Return | Rename one selected item |
 | `⌘C` / `⌘V` | Copy / paste |
@@ -109,7 +115,7 @@ File coordination does not freeze uncooperative writers. A changing filesystem c
 - File promises (for example, dragging a not-yet-downloaded attachment from another app) are not supported; drag actual files instead. Sidebar drag targets reorder shortcuts rather than transfer files.
 - No file-operation Undo, saved searches, recursive/content search, OCR, SFTP, or cleanup dashboard yet. These remain in [ROADMAP.md](ROADMAP.md).
 
-MacEx runs without App Sandbox in this preview, under your normal macOS account permissions. It does not elevate privileges or bypass SIP, ACLs, or privacy settings. Desktop/Documents/Downloads and volume privacy prompts occur only when those locations are accessed. Full Disk Access is not required for ordinary use. Hidden-file and appearance preferences use `UserDefaults`; the app does not persist file contents or credentials.
+MacEx runs without App Sandbox in this preview, under your normal macOS account permissions. It does not elevate privileges or bypass SIP, ACLs, or privacy settings. Desktop/Documents/Downloads and volume privacy prompts occur only when those locations are accessed. Full Disk Access is not required for ordinary use. Users can optionally grant it in System Settings → Privacy & Security → Full Disk Access to cover the Files and Folders privacy checks with a broader grant. Installation cannot grant this automatically. Permission choices are managed by macOS; Developer ID releases need a stable signing identity so updates can be recognized as the same app. Ad-hoc development rebuilds can cause repeat prompts. Full Disk Access does not bypass other protections or App Sandbox restrictions. Hidden-file and appearance preferences use `UserDefaults`; the app does not persist file contents or credentials.
 
 ## Tests
 
