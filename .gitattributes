@@ -1,0 +1,2 @@
+# Unified diff context requires a prefix even on otherwise blank lines.
+Vendor/patches/*.patch -whitespace
