@@ -12,6 +12,7 @@ final class AppWorkspace: ObservableObject {
     var changed: (() -> Void)?
     let jobs = SharedJobs()
     let cleanup = CleanupModel()
+    let localIndex = LocalIndexModel()
     init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let defaults = [("Home", "house", home), ("Desktop", "desktopcomputer", home.appendingPathComponent("Desktop")),

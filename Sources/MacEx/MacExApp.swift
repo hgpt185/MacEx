@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if let appearance = UserDefaults.standard.string(forKey: "appearance"), appearance != "system" {
             NSApplication.shared.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
         }
+        workspace.localIndex.configure(directory: stateURL.deletingLastPathComponent().appendingPathComponent("LocalIndex", isDirectory: true))
         workspace.knownHosts = SSHKnownHosts(url: stateURL.deletingLastPathComponent().appendingPathComponent("ssh-known-hosts.json"))
         workspace.openRemote = { [weak self] connection, secret, remember in self?.createRemote(connection, secret: secret, remember: remember) }
         buildMenu()
@@ -98,6 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
     func applicationWillTerminate(_ notification: Notification) {
+        workspace.localIndex.shutdown()
         for remote in remoteControllers.values { remote.model.clearPreview(synchronous: true) }
     }
     @discardableResult

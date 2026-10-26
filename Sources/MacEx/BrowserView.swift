@@ -29,6 +29,7 @@ struct BrowserView: View {
         .sheet(isPresented: $model.showConnections) {
             if let knownHosts = model.workspace.knownHosts { ConnectionSheet(workspace: model.workspace, knownHosts: knownHosts, initial: model.connectionDraft) }
         }
+        .sheet(isPresented: $model.showIndex) { LocalIndexSheet(browser: model, model: model.workspace.localIndex) }
         .sheet(isPresented: $model.showSearch) { SearchSheet(model: model) }
         .onExitCommand { if !model.filter.isEmpty { model.filter = "" } }
     }
@@ -82,6 +83,8 @@ struct BrowserView: View {
                     ForEach(model.workspace.shortcuts) { shortcut in shortcutButton(shortcut) }
                     Button(action: model.pinCurrentFolder) { Label("Pin Current Folder", systemImage: "pin").frame(maxWidth: .infinity, alignment: .leading) }
                         .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 8)
+                    Button { model.showIndex = true } label: { Label("Local OCR & Search…", systemImage: "text.viewfinder").frame(maxWidth: .infinity, alignment: .leading) }
+                        .buttonStyle(.plain).font(.system(size: 12)).padding(.horizontal, 12).padding(.vertical, 8)
                     let pinnedSearches = model.workspace.savedSearches.filter(\.pinned)
                     if !pinnedSearches.isEmpty {
                         sidebarLabel("Searches").padding(.top, 23)

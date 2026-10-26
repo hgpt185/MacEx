@@ -44,6 +44,7 @@ final class BrowserModel: ObservableObject {
     @Published var connectionDraft: SFTPConnection?
     @Published var showCleanup = false
     @Published var showSearch = false
+    @Published var showIndex = false
     @Published var searchFields = SearchFields()
     @Published var searchActive = false
     @Published var searchRunning = false
@@ -316,6 +317,27 @@ final class BrowserModel: ObservableObject {
         alert.beginSheetModal(for: window) { response in if response == .alertFirstButtonReturn { completion(field.stringValue) } }
     }
 
+    func showIndexedResults(_ documents: [IndexedDocument], summary: String) {
+        loadControl?.cancel(); generation = UUID(); isLoading = false
+        watcher = nil; refreshTask?.cancel(); errorMessage = nil
+        searchToken = UUID(); spotlight.cancel(); searchControl?.cancel()
+        searchActive = true; searchRunning = false; searchCoverage = nil
+        allEntries = documents.compactMap { try? FileEntry(url: URL(fileURLWithPath: $0.path)) }
+        selection = []; applyFilter(); searchSummary = summary
+    }
+    func searchLocalIndex(_ request: SearchRequest) {
+        guard let store = workspace.localIndex.store else { errorMessage = "Local index is unavailable."; return }
+        useSearchScope(request)
+        showIndexedResults([], summary: "Searching committed local OCR checkpoints…")
+        searchRunning = true; let token = searchToken
+        Task {
+            do {
+                let result = try await store.search(request)
+                guard searchToken == token else { return }
+                showIndexedResults(result.documents, summary: "\(result.documents.count) local-index matches\(result.limited ? " (cap reached)" : ""). Only explicitly indexed folders. OCR can miss text; missing date-added metadata is excluded. Review coverage in Local OCR & Search.")
+            } catch { guard searchToken == token else { return }; searchRunning = false; errorMessage = error.localizedDescription }
+        }
+    }
     func searchSpotlight(_ request: SearchRequest) { beginSearch(request, scan: false) }
     func scan(_ request: SearchRequest) { beginSearch(request, scan: true) }
     func rescan() { if let activeRequest { scan(activeRequest) } }
@@ -345,7 +367,13 @@ final class BrowserModel: ObservableObject {
             self?.workspace.renameSearch(search.id, title: name)
         }
     }
+    private func useSearchScope(_ request: SearchRequest) {
+        if SearchScope.canonicalPath(request.scope) != SearchScope.canonicalPath(location.path) {
+            navigate(URL(fileURLWithPath: request.scope, isDirectory: true))
+        }
+    }
     private func beginSearch(_ request: SearchRequest, scan: Bool) {
+        useSearchScope(request)
         loadControl?.cancel(); generation = UUID(); isLoading = false
         watcher = nil; refreshTask?.cancel(); errorMessage = nil
         activeRequest = request

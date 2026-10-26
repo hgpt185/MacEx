@@ -38,9 +38,15 @@ public enum SearchFreshness {
 }
 
 public enum SearchScope {
+    /// Expand only fixed macOS system aliases; never resolve user-created links.
+    public static func canonicalPath(_ path: String) -> String {
+        let path = (path as NSString).standardizingPath
+        for alias in ["/var", "/tmp", "/etc"] where path == alias || path.hasPrefix(alias + "/") { return "/private" + path }
+        return path
+    }
     public static func contains(itemPath: String, scopePath: String) -> Bool {
-        let root = (scopePath as NSString).standardizingPath
-        let item = (itemPath as NSString).standardizingPath
+        let root = canonicalPath(scopePath)
+        let item = canonicalPath(itemPath)
         guard item != root else { return false }
         let prefix = root.hasSuffix("/") ? root : root + "/"
         return item.hasPrefix(prefix)
@@ -59,17 +65,24 @@ public struct SearchRequest: Codable, Equatable, Sendable {
     public var createdTo: Date?
     public var modifiedFrom: Date?
     public var modifiedTo: Date?
+    public var addedFrom: Date?
+    public var addedTo: Date?
+    public var mediaType: String?
+    public var screenshotsOnly: Bool?
 
     public init(scope: String, name: String = "", fileExtension: String = "", kind: String = "", content: String = "",
                 minimumBytes: Int64? = nil, maximumBytes: Int64? = nil, createdFrom: Date? = nil, createdTo: Date? = nil,
-                modifiedFrom: Date? = nil, modifiedTo: Date? = nil) {
+                modifiedFrom: Date? = nil, modifiedTo: Date? = nil, addedFrom: Date? = nil, addedTo: Date? = nil,
+                mediaType: String? = nil, screenshotsOnly: Bool? = nil) {
         self.scope = scope; self.name = name; self.fileExtension = fileExtension; self.kind = kind; self.content = content
         self.minimumBytes = minimumBytes; self.maximumBytes = maximumBytes
         self.createdFrom = createdFrom; self.createdTo = createdTo; self.modifiedFrom = modifiedFrom; self.modifiedTo = modifiedTo
+        self.addedFrom = addedFrom; self.addedTo = addedTo; self.mediaType = mediaType; self.screenshotsOnly = screenshotsOnly
     }
 
     public func normalized() -> SearchRequest {
         var copy = self
+        copy.scope = SearchScope.canonicalPath(scope)
         copy.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         copy.kind = kind.trimmingCharacters(in: .whitespacesAndNewlines)
         copy.content = content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -81,9 +94,10 @@ public struct SearchRequest: Codable, Equatable, Sendable {
 
     public func validated() throws -> SearchRequest {
         let request = normalized()
-        guard !request.scope.isEmpty else { throw FileFailure.message("Choose a folder to search.") }
+        guard request.scope.hasPrefix("/"), !request.scope.contains("\0"), request.scope.utf8.count < 4096 else { throw FileFailure.message("Choose a folder to search.") }
         let hasTerm = !request.name.isEmpty || !request.fileExtension.isEmpty || !request.kind.isEmpty || !request.content.isEmpty
             || request.minimumBytes != nil || request.maximumBytes != nil
+            || request.addedFrom != nil || request.addedTo != nil || request.mediaType != nil || request.screenshotsOnly == true
             || request.createdFrom != nil || request.createdTo != nil || request.modifiedFrom != nil || request.modifiedTo != nil
         guard hasTerm else { throw FileFailure.message("Enter a name, extension, kind, size, date, or content term.") }
         if let from = request.modifiedFrom, let to = request.modifiedTo, from > to {
@@ -91,6 +105,12 @@ public struct SearchRequest: Codable, Equatable, Sendable {
         }
         if let from = request.createdFrom, let to = request.createdTo, from > to {
             throw FileFailure.message("The created-date range starts after it ends.")
+        }
+        if let from = request.addedFrom, let to = request.addedTo, from > to {
+            throw FileFailure.message("The date-added range starts after it ends.")
+        }
+        if let type = request.mediaType, !["image", "video", "audio", "pdf", "text"].contains(type) {
+            throw FileFailure.message("Choose a supported media type.")
         }
         if let lower = request.minimumBytes, let upper = request.maximumBytes, lower > upper {
             throw FileFailure.message("The minimum size is larger than the maximum size.")
@@ -112,7 +132,7 @@ public struct SavedSearch: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
-public struct SearchCandidate: Equatable, Sendable {
+public struct SearchCandidate: Codable, Equatable, Sendable {
     public var name: String
     public var fileExtension: String
     public var kind: String
@@ -120,15 +140,26 @@ public struct SearchCandidate: Equatable, Sendable {
     public var created: Date?
     public var modified: Date
     public var content: String?
-    public init(name: String, fileExtension: String, kind: String, size: Int64?, created: Date?, modified: Date, content: String?) {
+    public var added: Date?
+    public var mediaType: String?
+    public var isScreenshot: Bool
+    public init(name: String, fileExtension: String, kind: String, size: Int64?, created: Date?, modified: Date, content: String?, added: Date? = nil, mediaType: String? = nil, isScreenshot: Bool = false) {
         self.name = name; self.fileExtension = fileExtension; self.kind = kind; self.size = size
         self.created = created; self.modified = modified; self.content = content
+        self.added = added; self.mediaType = mediaType; self.isScreenshot = isScreenshot
     }
 }
 
 public enum SearchMatcher {
     public static func matches(_ candidate: SearchCandidate, request: SearchRequest) -> Bool {
         let request = request.normalized()
+        if let type = request.mediaType, candidate.mediaType != type { return false }
+        if request.screenshotsOnly == true && !candidate.isScreenshot { return false }
+        if request.addedFrom != nil || request.addedTo != nil {
+            guard let added = candidate.added else { return false }
+            if let from = request.addedFrom, added < from { return false }
+            if let to = request.addedTo, added > to { return false }
+        }
         if !request.name.isEmpty && !candidate.name.localizedStandardContains(request.name) { return false }
         if !request.fileExtension.isEmpty && candidate.fileExtension.compare(request.fileExtension, options: [.caseInsensitive, .diacriticInsensitive]) != .orderedSame { return false }
         if !request.kind.isEmpty && !candidate.kind.localizedStandardContains(request.kind) { return false }
@@ -159,6 +190,13 @@ public enum SpotlightPredicate {
         if !request.fileExtension.isEmpty { parts.append(NSPredicate(format: "kMDItemFSName ENDSWITH[cd] %@", ".\(request.fileExtension)")) }
         if !request.kind.isEmpty { parts.append(NSPredicate(format: "kMDItemKind CONTAINS[cd] %@", request.kind)) }
         if !request.content.isEmpty { parts.append(NSPredicate(format: "kMDItemTextContent CONTAINS[cd] %@", request.content)) }
+        if let type = request.mediaType {
+            let identifiers = ["image": "public.image", "video": "public.movie", "audio": "public.audio", "pdf": "com.adobe.pdf", "text": "public.text"]
+            if let identifier = identifiers[type] { parts.append(NSPredicate(format: "kMDItemContentTypeTree == %@", identifier)) }
+        }
+        if request.screenshotsOnly == true { parts.append(NSPredicate(format: "kMDItemIsScreenCapture == 1")) }
+        if let from = request.addedFrom { parts.append(NSPredicate(format: "kMDItemDateAdded >= %@", from as NSDate)) }
+        if let to = request.addedTo { parts.append(NSPredicate(format: "kMDItemDateAdded <= %@", to as NSDate)) }
         if let minimum = request.minimumBytes { parts.append(NSPredicate(format: "kMDItemFSSize >= %lld", minimum)) }
         if let maximum = request.maximumBytes { parts.append(NSPredicate(format: "kMDItemFSSize <= %lld", maximum)) }
         if let from = request.createdFrom { parts.append(NSPredicate(format: "kMDItemFSCreationDate >= %@", from as NSDate)) }
@@ -261,7 +299,9 @@ public enum FolderScan {
 
     private static func match(_ entry: FileEntry, content: String?, request: SearchRequest) -> Bool {
         let candidate = SearchCandidate(name: entry.name, fileExtension: entry.url.pathExtension, kind: entry.kind, size: entry.size,
-                                        created: created(entry.url), modified: entry.identity.modified, content: content)
+                                        created: created(entry.url), modified: entry.identity.modified, content: content,
+                                        added: LocalFileMetadata.added(entry.url), mediaType: LocalFileMetadata.mediaType(entry.url),
+                                        isScreenshot: LocalFileMetadata.isScreenshot(entry.url))
         return SearchMatcher.matches(candidate, request: request)
     }
 

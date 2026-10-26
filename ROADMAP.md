@@ -1,6 +1,6 @@
 # MacEx roadmap
 
-The approved baseline is direct distribution, macOS 14+, Intel and Apple silicon, and local daily use before advanced features. P1 through P5 implementation are authorized. Later work follows the roadmap after P5 verification. Distribution is open source through GitHub, without an Apple Developer Program requirement. Developer ID signing and notarization are deferred optional work, not blockers for GitHub previews. Each phase must remain runnable and independently verified.
+The approved baseline is direct distribution, macOS 14+, Intel and Apple silicon, and local daily use before advanced features. P1 through P6 implementation and P7’s optional local research preview are implemented. All remaining roadmap phases were authorized on 2026-10-26. Distribution is open source through GitHub, without an Apple Developer Program requirement. Developer ID signing and notarization are deferred optional work, not blockers for GitHub previews. Each phase must remain runnable and independently verified.
 
 ## P1 — Local list-view milestone
 
@@ -48,6 +48,8 @@ Gate: disposable SSH server tests for trust, credentials, algorithms, nonstandar
 
 ## P6 — OCR and natural-language filters
 
+Implementation status: implemented in 0.7.0 with explicit local roots, bounded Vision/PDF/text extraction, private SQLite FTS5, exclusions/languages, per-file checkpoints, live-identity checks, event invalidation/reconciliation, resource policy, pause/resume/clear controls, and editable deterministic natural-language filters. See `docs/P6-VERIFICATION.md` for evidence and platform limits.
+
 Opt-in local roots use Vision OCR and app-private SQLite FTS. Add exclusions, supported languages, incremental FSEvents invalidation with reconciliation, checkpoints, caps, pause/resume/cancel, battery/thermal policy, and clear-index controls. Never trigger broad scanning merely by launching.
 
 Translate supported natural-language phrases into visible editable `SearchRequest` filters. “Large videos in Downloads” is a deterministic filter. “Screenshots containing an invoice” searches OCR text, not inferred visual meaning. “Last week” is the prior calendar week using local calendar/time zone. Download date uses date-added metadata where available with missing-coverage disclosure. Unsupported phrases request refinement.
@@ -55,6 +57,8 @@ Translate supported natural-language phrases into visible editable `SearchReques
 Gate: opt-in boundaries, incremental updates/deletions, recovery, resource limits, clear-data behavior, locale/date fixtures, offline use, and no network traffic or model dependency.
 
 ## P7 — Optional semantic-search research
+
+Research status: 0.7.0 includes two explicit session-only experiments: installed OS sentence embeddings for related text and Vision feature prints for image-to-image similarity. No external model is downloaded, redistributed, or assumed available. Synthetic ranking fixtures and CPU/process-RSS/elapsed metrics are recorded in `docs/P7-RESEARCH.md`. Broad relevance benchmarks and hardware energy measurement remain unclaimed; these are research previews, not default search or duplicate proofs.
 
 Suggestion, not a required feature gate: evaluate local text/image embeddings only after ordinary search and OCR work well. Require explicit opt-in and measured license, download size, RAM, energy, accuracy, and deletion behavior. No assumed paid service or API key.
 

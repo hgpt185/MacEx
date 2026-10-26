@@ -12,19 +12,19 @@ This builds arm64 and x86_64 binaries for macOS 14+ and produces:
 
 - `dist/MacEx.app`: universal ad-hoc signed app.
 - `dist/release/MacEx.app`: the same app with hardened runtime.
-- `dist/MacEx-0.5.0.dmg` and `dist/MacEx-0.5.0.zip`: download packages.
-- `dist/MacEx-0.5.0-SHA256SUMS.txt`: SHA-256 checksums for both packages.
+- `dist/MacEx-0.7.0.dmg` and `dist/MacEx-0.7.0.zip`: download packages.
+- `dist/MacEx-0.7.0-SHA256SUMS.txt`: SHA-256 checksums for both packages.
 
 Versioned filenames follow `Resources/Info.plist`. License and dependency notices are included inside the app. Bundled static SSH libraries have no Homebrew runtime dependency. To rebuild those libraries from verified source pins, run `python3 Scripts/build-ssh-dependencies.py`; see `Vendor/README.md`.
 
 Create a GitHub preview release only after tests, native checks, and artifact checks pass:
 
 ```sh
-gh release create v0.5.0 \
-  dist/MacEx-0.5.0.dmg \
-  dist/MacEx-0.5.0.zip \
-  dist/MacEx-0.5.0-SHA256SUMS.txt \
-  --title 'MacEx 0.5.0 preview' --prerelease --notes-file docs/RELEASE-NOTES-0.5.0.md
+gh release create v0.7.0 \
+  dist/MacEx-0.7.0.dmg \
+  dist/MacEx-0.7.0.zip \
+  dist/MacEx-0.7.0-SHA256SUMS.txt \
+  --title 'MacEx 0.7.0 preview' --prerelease --notes-file docs/RELEASE-NOTES-0.7.0.md
 ```
 
 Downloads are public only when the repository/release is public. Preview notes must identify remaining compatibility/quality limits and the ad-hoc/not-notarized status. Do not describe ad-hoc signature verification as an Apple trust assessment.
