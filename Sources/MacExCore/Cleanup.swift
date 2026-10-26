@@ -219,6 +219,7 @@ public enum CleanupScanner {
                 var value = stat()
                 guard fstatat(fd, name, &value, AT_SYMLINK_NOFOLLOW) == 0 else { note("Could not inspect \(child.path): \(String(cString: strerror(errno)))"); continue }
                 let identity = FileIdentity(value)
+                if FileAvailability.isOnlineOnly(child) { note("Skipped online-only file: \(child.path)"); continue }
                 if identity.isSymbolicLink { note("Skipped link: \(child.path)"); continue }
                 if identity.isDirectory {
                     if value.st_dev != directoryStat.st_dev { note("Skipped nested volume: \(child.path). Select it as a separate root."); continue }

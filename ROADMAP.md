@@ -2,6 +2,12 @@
 
 The approved baseline is direct distribution, macOS 14+, Intel and Apple silicon, and local daily use before advanced features. P1 through P6 implementation and P7’s optional local research preview are implemented. All remaining roadmap phases were authorized on 2026-10-26. Distribution is open source through GitHub, without an Apple Developer Program requirement. Developer ID signing and notarization are deferred optional work, not blockers for GitHub previews. Each phase must remain runnable and independently verified.
 
+## P8 — revised single-window library workflow
+
+The 2026-10-26 user correction supersedes the old multiwindow/Finder-oriented UI. Version 0.8.0 implements a Home/category library, recent shelves, source grouping, integrated editable search, in-window previews/player/inspector/OCR, reviewed cleanup/look-alikes/Trash history, optional rules, in-window SFTP, settings, global search/menu bar, App Intents and optional GitHub updates. Folder selection and confirmations are app views; no external file app or additional file-manager window is launched. User-authorized optional Trash/move rules supersede the earlier blanket no-automation constraint; they default off and never permanently delete files. See `docs/P8-VERIFICATION.md` for implementation evidence and remaining validation limits.
+
+Earlier phase descriptions below are historical engine milestones. Their multiwindow restoration, external-open, native picker and floating Quick Look UI are intentionally retired in the current product.
+
 ## P1 — Local list-view milestone
 
 Browser shell, familiar locations, mounted volumes, breadcrumbs, history, typed paths, list sorting/filtering, metadata, hidden files, multi-selection, native menus, opening, creation, rename, copy/move/duplicate/Trash, collision handling, cancellation, and errors.

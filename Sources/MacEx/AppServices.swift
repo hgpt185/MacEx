@@ -10,6 +10,7 @@ final class AppWorkspace: ObservableObject {
     var openRemote: ((SFTPConnection, String, Bool) -> Void)?
     var knownHosts: SSHKnownHosts?
     var changed: (() -> Void)?
+    let interaction = InAppInteraction()
     let jobs = SharedJobs()
     let cleanup = CleanupModel()
     let localIndex = LocalIndexModel()
@@ -95,6 +96,19 @@ final class SharedJobs: ObservableObject {
                     summary = result; self.control = nil; busy = false; progress = nil
                     NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
                     if !result.errors.isEmpty { owner.errorMessage = result.errors.joined(separator: "\n") }
+                }
+            }
+        }
+    }
+    func startLibraryCleanup(_ review: LibraryTrashReview, owner: BrowserModel) {
+        guard !busy else { return }
+        let control = JobControl(); self.control = control; self.owner = owner; action = .trash; summary = nil; busy = true; owner.showingOperations = true
+        Task {
+            for await event in MacExCore.OperationQueue.startLibraryCleanup(review, control: control) {
+                switch event {
+                case let .progress(value): progress = value
+                case let .finished(value): summary = value; progress = nil; busy = false; self.control = nil; NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
+                case .conflict: break
                 }
             }
         }

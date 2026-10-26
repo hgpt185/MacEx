@@ -15,6 +15,7 @@ struct ConnectionSheet: View {
     @ObservedObject var workspace: AppWorkspace
     let knownHosts: SSHKnownHosts
     var initial: SFTPConnection?
+    var onClose: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @StateObject private var state = ConnectionState()
 
@@ -90,14 +91,14 @@ struct ConnectionSheet: View {
             }
             if !state.message.isEmpty { Text(state.message).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
             HStack {
-                Button("Cancel") { state.secret = ""; dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { state.secret = ""; if let onClose { onClose() } else { dismiss() } }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Connect") {
                     do {
                         let connection = try connection()
                         if state.saveConnection { try workspace.saveConnection(connection) }
                         let credential = state.secret; state.secret = ""
-                        dismiss(); workspace.openRemote?(connection, credential, state.saveSecret)
+                        if let onClose { onClose() } else { dismiss() }; workspace.openRemote?(connection, credential, state.saveSecret)
                     } catch { state.message = error.localizedDescription }
                 }.keyboardShortcut(.defaultAction)
             }
@@ -122,12 +123,8 @@ struct ConnectionSheet: View {
         return try result.validated()
     }
     private func chooseKey() {
-        guard let window = NSApp.keyWindow else { return }
-        let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = false
-        panel.resolvesAliases = false; panel.allowsMultipleSelection = false; panel.prompt = "Choose Private Key"
-        panel.beginSheetModal(for: window) { response in
-            guard response == .OK, let url = panel.url else { return }
-            state.draft.privateKey = FolderBookmark(url: url)
+        workspace.interaction.choose("Choose an RSA/Ed25519 private key", folder: false) { url in
+            if let url { state.draft.privateKey = FolderBookmark(url: url) }
         }
     }
 }

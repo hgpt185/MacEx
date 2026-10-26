@@ -42,12 +42,12 @@ final class Thumbnails {
     }
     @discardableResult
     func request(_ entry: FileEntry, completion: @escaping (NSImage?) -> Void) -> (String, UUID)? {
-        guard entry.identity.isRegular else { completion(nil); return nil }
+        guard entry.identity.isRegular, !FileAvailability.isOnlineOnly(entry.url) else { completion(nil); return nil }
         let key = key(entry); let token = UUID(); clock &+= 1
         if var cached = cache[key] { cached.access = clock; cache[key] = cached; completion(cached.image); return nil }
         if var existing = pending[key] { existing.callbacks[token] = completion; pending[key] = existing; return (key, token) }
         guard pending.count < 128 else { completion(nil); return nil }
-        let request = QLThumbnailGenerator.Request(fileAt: entry.url, size: NSSize(width: 96, height: 96), scale: NSScreen.main?.backingScaleFactor ?? 2, representationTypes: .thumbnail)
+        let request = QLThumbnailGenerator.Request(fileAt: entry.url, size: NSSize(width: 280, height: 210), scale: NSScreen.main?.backingScaleFactor ?? 2, representationTypes: .thumbnail)
         pending[key] = Pending(request: request, callbacks: [token: completion]); queue.append(key); pump()
         return (key, token)
     }

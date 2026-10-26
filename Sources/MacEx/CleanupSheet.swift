@@ -4,6 +4,7 @@ import MacExCore
 struct CleanupSheet: View {
     @ObservedObject var browser: BrowserModel
     @ObservedObject var model: CleanupModel
+    var onClose: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     private var locked: Bool { model.running || model.trashRunning }
     private let diskDisclosure = "Logical bytes describe file contents. Allocated bytes are estimates, not guaranteed recoverable space: APFS clones, snapshots, compression, hard links, and open files affect actual disk use. Trash does not free space until emptied."
@@ -13,7 +14,7 @@ struct CleanupSheet: View {
             HStack {
                 Label("Cleanup Review", systemImage: "externaldrive.badge.magnifyingglass").font(.title2)
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.trashRunning)
+                Button("Done") { close() }.keyboardShortcut(.cancelAction).disabled(model.trashRunning)
             }
             Text("Review candidates individually. Age, size, empty contents, and duplicate bytes do not make a file universally safe to delete.")
                 .font(.callout).foregroundStyle(.secondary)
@@ -131,7 +132,7 @@ struct CleanupSheet: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
             Button("Reveal") {
-                dismiss(); browser.navigate(file.url.deletingLastPathComponent())
+                close(); browser.navigate(file.url.deletingLastPathComponent())
             }.buttonStyle(.link)
         }.padding(.vertical, 5)
     }
@@ -159,4 +160,6 @@ struct CleanupSheet: View {
         }.frame(maxHeight: .infinity)
     }
     private func bytes(_ value: Int64) -> String { ByteCountFormatter.string(fromByteCount: value, countStyle: .file) }
+    private func close() { if let onClose { onClose() } else { dismiss() } }
+
 }

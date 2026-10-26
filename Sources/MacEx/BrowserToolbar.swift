@@ -47,7 +47,7 @@ struct BrowserToolbar: View {
                         if model.busy { Circle().fill(.blue).frame(width: 6, height: 6).offset(x: 3, y: -2) }
                     }.frame(width: 30, height: 30)
                 }.buttonStyle(.plain).help("File operations").accessibilityLabel("File operations")
-                    .popover(isPresented: $model.showingOperations, arrowEdge: .bottom) { operationsPanel }
+
             }.foregroundStyle(.secondary)
         }.padding(.horizontal, 8).frame(maxWidth: .infinity).frame(height: 36)
         .tint(Color(red: 0.13, green: 0.43, blue: 0.86))

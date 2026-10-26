@@ -16,20 +16,18 @@ final class CleanupModel: ObservableObject {
     @Published var retained: [UUID: URL] = [:] { didSet { review = nil } }
     @Published var review: CleanupReview?
     @Published var trashRunning = false
+    weak var interaction: InAppInteraction?
     private var control: JobControl?
     private var generation = UUID()
     private static let worker = DispatchQueue(label: "app.macex.cleanup-scan", qos: .utility)
 
     func addRoots(window: NSWindow?) {
-        guard let window else { return }
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
-        panel.allowsMultipleSelection = true; panel.prompt = "Choose Folders"
-        panel.beginSheetModal(for: window) { [weak self] response in
-            guard response == .OK, let self else { return }
-            self.roots = Array(Set(self.roots + panel.urls.map { $0.standardizedFileURL })).sorted { $0.path < $1.path }
-            self.invalidate()
+        interaction?.choose("Choose a cleanup folder", folder: true) { [weak self] url in
+            guard let self, let url, self.roots.count < 16 else { return }
+            self.roots = Array(Set(self.roots + [url])).sorted { $0.path < $1.path }; self.invalidate()
         }
     }
+
     func invalidate() {
         control?.cancel(); generation = UUID(); running = false
         scan = nil; selected = []; retained = [:]; review = nil
@@ -75,7 +73,7 @@ final class CleanupModel: ObservableObject {
             self.scan = nil; self.selected = []; self.retained = [:]; self.trashRunning = false
             self.status = "Moved \(summary.completed.count) file(s) to Trash. "
                 + (summary.cancelled ? "Cancelled. " : "") + summary.errors.joined(separator: "\n")
-                + "\nScan again before another cleanup. Trash retains the data until you empty it in Finder."
+                + "\nScan again before another cleanup. Trash retains the data until you empty it."
         }
     }
 }

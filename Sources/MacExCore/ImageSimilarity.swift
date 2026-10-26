@@ -55,7 +55,7 @@ public enum ImageSimilarity {
         return ImageSimilarityResult(matches: Array(matches.prefix(50)), evaluated: evaluated, skipped: skipped,
             limited: evaluated + skipped < candidates.count, cost: ResearchCost.measure(since: start))
     }
-    private static func featurePrint(_ url: URL, control: JobControl) throws -> VNFeaturePrintObservation {
+    static func featurePrint(_ url: URL, control: JobControl) throws -> VNFeaturePrintObservation {
         try control.checkCancellation()
         let identity = try FileIdentity(url)
         guard identity.isRegular, identity.size <= 64 * 1024 * 1024, LocalFileMetadata.mediaType(url) == "image" else {

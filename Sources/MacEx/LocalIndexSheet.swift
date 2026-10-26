@@ -10,13 +10,14 @@ private final class LocalIndexFields: ObservableObject {
 struct LocalIndexSheet: View {
     @ObservedObject var browser: BrowserModel
     @ObservedObject var model: LocalIndexModel
+    var onClose: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @StateObject private var fields = LocalIndexFields()
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Local OCR & Search").font(.title2).bold()
-                Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+                Spacer(); Button("Done") { close() }.keyboardShortcut(.cancelAction)
             }
             Text("Text stays in MacEx’s private index on this Mac. No cloud service or model download. Indexing starts only when you press Start; opening MacEx never starts a scan.")
                 .font(.callout).foregroundStyle(.secondary)
@@ -29,9 +30,7 @@ struct LocalIndexSheet: View {
             if let error = model.error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
             Text(model.status).font(.caption).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(3)
         }.padding(20).frame(width: 760, height: 670).onAppear { model.load() }
-            .confirmationDialog("Clear all indexed text? Source files remain unchanged. Saved folders and settings remain.", isPresented: $fields.clearConfirmation) {
-                Button("Clear Index", role: .destructive) { model.clear() }
-            }
+
     }
     private var folders: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -67,7 +66,7 @@ struct LocalIndexSheet: View {
             HStack {
                 Button("Start / Resume / Reconcile") { model.start() }.disabled(model.running || model.roots.isEmpty)
                 Button("Pause / Stop") { model.stop() }.disabled(!model.running && !model.monitoring)
-                Spacer(); Button("Clear Index…", role: .destructive) { fields.clearConfirmation = true }.disabled(model.running)
+                Spacer(); Button("Clear Index…", role: .destructive) { browser.workspace.interaction.confirm("Clear indexed text?", message: "Source files and selected folders stay unchanged.", button: "Clear Index") { if $0 { model.clear() } } }.disabled(model.running)
             }
         }.padding(14)
     }
@@ -77,7 +76,7 @@ struct LocalIndexSheet: View {
             TextField("Words in text, screenshots or PDFs", text: $fields.content).textFieldStyle(.roundedBorder)
             HStack {
                 Button("Search Indexed Text") { model.search(SearchRequest(scope: browser.location.path, content: fields.content)) }.disabled(model.running || fields.content.trimmingCharacters(in: .whitespaces).isEmpty)
-                Button("Use Editable Search Filters") { browser.showIndex = false; dismiss(); DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { browser.showSearch = true } }
+                Button("Use Editable Search Filters") { browser.showIndex = false; close(); DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { browser.showSearch = true } }
             }
             results
         }.padding(14)
@@ -121,8 +120,10 @@ struct LocalIndexSheet: View {
             }
             Button("Show Results in Browser") {
                 browser.showIndexedResults(model.documents, summary: model.resultSummary)
-                dismiss()
+                close()
             }.disabled(model.running || model.documents.isEmpty)
         }
     }
+    private func close() { if let onClose { onClose() } else { dismiss() } }
+
 }

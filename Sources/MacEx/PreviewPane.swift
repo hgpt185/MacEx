@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
-import QuickLookUI
 import MacExCore
 
 @MainActor private final class TextPreviewState: ObservableObject {
@@ -68,17 +67,7 @@ struct PreviewPane: View {
     }
 }
 
-struct SystemPreview: NSViewRepresentable {
+struct SystemPreview: View {
     let url: URL
-    func makeNSView(context: Context) -> QLPreviewView {
-        let view = QLPreviewView(frame: .zero, style: .normal)!
-        view.shouldCloseWithWindow = false; view.autostarts = false
-        view.previewItem = url as NSURL
-        view.setAccessibilityLabel("File preview")
-        return view
-    }
-    func updateNSView(_ view: QLPreviewView, context: Context) {
-        if view.previewItem?.previewItemURL != url { view.previewItem = url as NSURL }
-    }
-    static func dismantleNSView(_ view: QLPreviewView, coordinator: ()) { view.previewItem = nil; view.close() }
+    var body: some View { StandaloneInlinePreview(url: url) }
 }

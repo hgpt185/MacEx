@@ -37,6 +37,7 @@ public enum LocalTextExtractor {
     }
     public static func extract(_ url: URL, root: URL, options: IndexOptions, control: JobControl) throws -> ExtractedText {
         try control.checkCancellation()
+        guard !FileAvailability.isOnlineOnly(url) else { throw FileFailure.message("Online-only file skipped; no download requested.") }
         guard SearchScope.contains(itemPath: url.path, scopePath: root.path),
               url.resolvingSymlinksInPath().standardizedFileURL == url.standardizedFileURL else {
             throw FileFailure.message("Links and paths through links are excluded.")

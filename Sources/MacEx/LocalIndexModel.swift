@@ -26,6 +26,7 @@ final class LocalIndexModel: ObservableObject {
     @Published var keepUpdated = true
     @Published var error: String?
     private(set) var store: LocalIndex?
+    weak var interaction: InAppInteraction?
     private var directory: URL?
     private var loaded = false
     private var settingsValid = true
@@ -71,15 +72,14 @@ final class LocalIndexModel: ObservableObject {
     }
     func addFolder() {
         guard !running, !monitoring else { return }
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
-        panel.message = "Only this folder and its descendants will be indexed. Hidden files, packages, links and exclusions are skipped."
-        guard panel.runModal() == .OK, let url = panel.url?.resolvingSymlinksInPath(), roots.count < 8 else { return }
-        guard roots.allSatisfy({ $0 != url.path && !SearchScope.contains(itemPath: url.path, scopePath: $0) && !SearchScope.contains(itemPath: $0, scopePath: url.path) }) else {
-            error = "Choose a folder that does not overlap an existing root."; return
+        interaction?.choose("Add a text-recognition folder", folder: true) { [weak self] url in
+            guard let self, let url, self.roots.count < 8 else { return }
+            guard self.roots.allSatisfy({ $0 != url.path && !SearchScope.contains(itemPath: url.path, scopePath: $0) && !SearchScope.contains(itemPath: $0, scopePath: url.path) }) else { self.error = "Choose a non-overlapping folder."; return }
+            self.roots.append(SearchScope.canonicalPath(url.path))
+            do { try self.saveSettings() } catch { self.roots.removeLast(); self.error = error.localizedDescription }
         }
-        roots.append(SearchScope.canonicalPath(url.path))
-        do { try saveSettings() } catch { roots.removeLast(); self.error = error.localizedDescription }
     }
+
     func remove(_ root: String) {
         guard !running, !monitoring, let store else { return }
         running = true
@@ -188,10 +188,9 @@ final class LocalIndexModel: ObservableObject {
         }
     }
     func chooseImage() {
-        let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.image]; panel.message = "Use this one image as a local similarity reference. No folder scan or upload."
-        if panel.runModal() == .OK { imageReference = panel.url }
+        interaction?.choose("Choose one local reference image", folder: false) { [weak self] url in self?.imageReference = url }
     }
+
     func similarImages(scope: String) {
         guard !running, let store, let reference = imageReference else { return }
         let consent = imageConsent, control = JobControl(); self.control = control

@@ -1,199 +1,98 @@
 # MacEx
 
-A standalone native macOS file manager. Version **0.7.0** carries P1–P6 plus P7’s optional research preview: local browsing, daily-use polish, conventional search, reviewed cleanup, secure SFTP, opt-in local OCR, editable natural-language filters, and local text/image similarity experiments. MacEx coexists with Finder; it does not replace the desktop or system file dialogs. GitHub previews are ad-hoc signed and not notarized; remaining compatibility and quality checks are documented.
+A native, open-source Mac file library. **0.8.0 rebuilds the workflow around one window**: Home, categories, recent shelves, download sources, visible search filters, previews, music, cleanup, connections and settings.
 
-## Build and run
+Files open inside MacEx. Space and double-click preview them in the existing window. Folder selection, rename, conflict handling, host-key review and transfer destinations use in-window controls. MacEx does not launch Finder, external file applications, separate Quick Look panels, browser windows, or additional file-manager windows for these actions. Dock reopening and global Quick Search reuse the same window. macOS-owned menus and permission prompts remain system UI.
 
-Requires macOS 14 or newer and a Swift 6 toolchain. Xcode Command Line Tools are sufficient to build the app and service tests. Full Xcode is needed to run the supplied Xcode UI-test host and Instruments profiling.
+The app code is [MIT licensed](LICENSE). GitHub previews are universal, ad-hoc signed and **not notarized**. No Apple Developer Program membership, account, subscription, API key or cloud AI service is required. Bundled SSH dependencies retain their own [notices and source pins](Vendor/README.md).
+
+## The workflow
+
+1. Open Home and **Add Folder…**. Browse with MacEx’s own picker and choose the folders you want in the library.
+2. Open Images, Videos, Music, Documents, Archives or Apps. Switch between thumbnail grid and list, adjust card size and sort, or use Recents, Large Files and Screenshots.
+3. Search from the top bar. Phrases become removable chips and editable type, extension, size, source and date filters. Save searches to the sidebar; relative dates are recalculated when reopened, and manual filter changes are retained.
+4. Preview with Space, double-click or `⌘O`. Inspect source, dimensions, duration, camera, dates and tags where metadata exists. Images/PDFs support **Copy Text**, batch OCR copying and selectable transcripts. Audio plays in the shared player; arrows move between previews.
+5. Open Duplicates or Clean Up, review candidates, and move explicit selections to Trash. Restore MacEx-managed Trash moves from the in-app history. Similar Photos has its own review flow and never claims visual similarity proves identical content.
+
+The main flow was informed by [Homy’s public workflow](https://tryhomy.app/). MacEx uses its own code, branding and assets. Homy’s purchase/licensing system, Finder shortcuts and floating search panel are not part of this open-source, single-window design.
+
+## Search and download sources
+
+Supported examples include:
+
+- `pdfs from last week over 5 mb`
+- `videos from my iphone in august`
+- `screenshots with wifi password`
+- `zips bigger than 1gb older than 6 months`
+- `pdfs from gmail`
+- `large videos in Downloads`
+
+Search also matches names and tags. Remaining words stay literal; they are not interpreted as visual meaning. OCR content search uses committed text from explicitly enabled local recognition. Filters show the chosen interpretation. Size units use decimal bytes. Prior-week/month boundaries use the local calendar and time zone; camera/screenshot date filters prefer captured/created metadata, while ordinary date filters use added/created dates. Missing metadata can exclude a file from a filter. Camera and capture information depends on available embedded/Spotlight metadata.
+
+Downloaded From groups existing source metadata into hostnames. It reads bounded `kMDItemWhereFroms` attributes directly, with available Spotlight metadata as a fallback. Full source URLs, query tokens and browser history are not persisted. Missing source information remains unknown; websites are not contacted to infer provenance. Gmail, Drive, ChatGPT, Slack, GitHub and other domains can be filtered.
+
+## OCR, local files and resource bounds
+
+Adding folders refreshes their local metadata. Text recognition is a separate, visible choice on Home or in Settings. It uses Vision, PDFKit and a private SQLite FTS5 index. Choosing a root, loading saved settings and launching the app do not initiate a broad content scan. Relaunch loads the saved library; refresh explicitly reconciles it. Active sessions use folder events to refresh changes.
+
+Online-only/dataless files are never hydrated for library thumbnails, OCR, hashing, similarity or cleanup. Such entries can remain visible as online-only metadata. Hidden files, links, packages’ descendants, developer caches and Library/Trash internals are excluded from library scans. App bundles appear as metadata without recursively scanning their contents. Unknown package sizes are not treated as empty-file candidates.
+
+Library passes cap at 20,000 entries stored and 100,000 examined, depth 32, eight chosen roots and 32 MiB per saved metadata snapshot. OCR retains its per-file checkpoints, 64 MiB source cap, 50-megapixel image cap, first-frame/2,048-pixel processing, ten PDF pages, 65,536-character text cap and approximately 512 MiB database cap. Recognition respects battery, Low Power Mode and thermal policy; pause/resume and clear-data controls remain in Settings. Explicit batch Copy Text caps at 20 files and one million output characters.
+
+Thumbnail work uses two active requests, a 128-request queue and a 64 MiB/512-image memory cache. Framework-managed allocations and the duration of an individual recognition/media request have no universal hard bound. Broad performance, energy and accessibility certification is not claimed.
+
+## Cleanup, rules and Trash
+
+Duplicates use size/sample checks, SHA-256 and final byte comparison. Hard-link aliases are review-only in duplicate cleanup. The interface suggests a retained copy; selections remain explicit. Retained copies and selected files are revalidated before cleanup. There is no permanent-delete fallback.
+
+Clean Up offers forgotten downloads, old installers, old screenshots, big old videos, unused apps with available last-used metadata, and empty regular files. Age, size and installer extension are review signals, not proof of safety or proof that software was installed. Bundle sizes and missing usage metadata are disclosed. Logical bytes and estimated allocated/recoverable space can differ because of APFS clones, snapshots, compression, hard links and open files. Trash retains data until emptied.
+
+Optional rules default off and require a separate in-app opt-in. They can move old `.dmg`/`.pkg` files to Trash and organize screenshots into monthly folders under the first library root. They run after refresh and every 30 minutes while the app is open. Rule destinations reject link components and paths outside that root. No automatic permanent deletion occurs.
+
+The local Trash history stores original paths and resulting Trash paths for up to 500 MacEx-managed moves. Restore checks identities, retains original names and uses the normal non-overwriting move/conflict engine. Files already changed, emptied or restored elsewhere report an error. History does not claim to reconstruct the original location of every file trashed by another app. Browsing Trash itself is also an in-window action, subject to macOS permissions.
+
+## Music, Quick Search, menu bar and Shortcuts
+
+Double-click a local song to play in the shared toolbar. Play/pause, previous/next and seeking stay in the same window. The playlist continues across library navigation. Video controls are embedded; external PDF link/actions and preview context menus do not launch other apps.
+
+Quick Search defaults to `⇧⌘Space` and is configurable in Settings. It brings the existing window forward and focuses search. The optional menu bar lists the ten latest indexed downloads by added date, with thumbnails, drag support and in-app opening. A custom Downloads location can be selected. Grid multi-file dragging uses macOS 26’s drag containers when compiled with the current SDK; native folder grid/list dragging remains available on older systems/toolchains.
+
+App Intents provide **Find Files**, **Get Latest Download** and **Search in MacEx**. `macex://search?query=...` also routes search into the existing window. Full Xcode extracts the metadata needed for Shortcuts/Siri discovery; the GitHub release workflow includes it. Command Line Tools builds run the app and URL search, but need extracted metadata from a full Xcode build for system Shortcuts discovery.
+
+## Secure SFTP
+
+Connections open as a page inside the same window. Saved profiles, host-key verification before authentication, optional explicit Keychain storage, password/key/agent login, browsing, safe rename/mkdir, exclusive-create upload/download, progress, cancellation and bounded preview downloads are preserved.
+
+Unknown host fingerprints require independent review and confirmation before credentials are sent. Changed pins block authentication until separately reviewed. Secrets never enter workspace/catalog files. No agent forwarding, terminal, remote Trash, recursive transfer, background edit/upload synchronization or automatic reconnect is provided. Existing destinations are never replaced. Failed/cancelled transfers can retain new partial files, identified in their status.
+
+## GitHub preview updates
+
+Updates default off. Explicit opt-in enables daily checks against this repository’s public GitHub releases, bounded downloads, SHA-256 verification, archive path/size/link checks, bundle/version checks and strict ad-hoc signature validation. A verified update installs on Quit into a writable app location; the previous app is retained as a uniquely named backup. Read-only locations report an actionable error. No privileged helper, global Gatekeeper change, quarantine removal or notarization service is used.
+
+GitHub receives the network connection for checks/downloads; names and contents from the library are not transmitted. Checksums and the ad-hoc signature do not establish Apple Developer ID trust or independent publisher authentication. See [distribution instructions](docs/RELEASE.md).
+
+## Build and tests
+
+macOS 14+ and Swift 6 are required. Intel and Apple silicon are supported build targets; wider runtime checks remain documented preview gates.
 
 ```sh
 git clone https://github.com/hgpt185/MacEx.git
 cd MacEx
-swift build
+zsh Scripts/test-sftp.sh
+zsh Scripts/test-local-search-offline.sh
 zsh Scripts/build-app.sh debug
 open dist/MacEx.app
 ```
 
-Create an optimized universal development app:
+Python fixture dependencies are installed privately under `.build` for SFTP tests; they are not app runtime dependencies. Full Xcode additionally validates the supplied UI host and extracts App Intents metadata. No signing account is required for these builds.
 
 ```sh
-zsh Scripts/build-app.sh release --universal
+zsh Scripts/package-release.sh --prepare
+xcodebuild -project MacEx.xcodeproj -scheme MacEx -destination 'platform=macOS' test
 ```
 
-The build script generates the original white/blue folder-passage icon and ad-hoc signs the bundle. This is an **open-source preview for GitHub distribution**, with ad-hoc signing and no notarization. An Apple Developer Program account is not required. Building does not install the app, change Finder defaults, or create a login item.
+Tests use isolated temporary fixtures. The optional cross-volume test requires an explicitly supplied disposable mounted volume through `MACEX_TEST_VOLUME`; it skips when absent. Native QA uses a separate app identifier and state directory, leaving the normal MacEx session alone. Launch flags `--folder` and `--state-directory` support that isolation.
 
-To start from a specific folder when launching directly:
+Library metadata/settings, OCR data, Trash history, saved connections and window state live under `~/Library/Application Support/MacEx/` with private app-owned files. SSH secrets use Keychain only after explicit selection. MacEx runs under the normal macOS account and does not bypass file permissions, privacy controls or SIP. System permission changes must be made manually by the user; the app does not launch System Settings.
 
-```sh
-dist/MacEx.app/Contents/MacOS/MacEx --folder /absolute/folder/path
-```
-
-## Available in P1
-
-- Native sidebar with familiar folders and mounted volumes, breadcrumbs, back/forward, parent navigation, and Go to Folder.
-- Virtualized AppKit list with natural sorting, filename filtering, type/size/modification metadata, hidden files, and multi-selection.
-- Default-application opening, folder creation, rename, duplicate, copy, same-volume move, verified cross-volume move, and Trash.
-- Native menus, context menus, keyboard shortcuts, operation feedback, cooperative cancellation, conflict decisions, and permission errors.
-- Event-driven refresh for the current folder, bounded directory workers, progressive metadata batches, and native light/dark appearance.
-- Local workflows need no network, accounts, telemetry, AI services, or content index. Optional SFTP uses bundled SSH libraries and connects only when requested.
-
-File filtering searches names in the current folder only. It is not recursive or content search.
-
-## Added in P2
-
-- A virtualized native icon grid with lazy Quick Look thumbnails and multi-selection.
-- Native macOS tabs and separate windows, each retaining its own location, navigation history, filter, view mode, sort, and preview preference. The standard Window menu lists open windows/tabs.
-- Shared application-wide operation state and clipboard tracking. Copy in one tab and use Move Here in another.
-- Open With lists compatible installed applications and offers an application chooser without changing default handlers.
-- Space opens system Quick Look. An optional resizable preview pane uses system previews for images, PDFs, audio/video, and other supported formats. Text/code uses a selectable, bounded 1 MiB preview with truncation disclosure. Inline media autoplay is disabled; the system Quick Look panel retains its own behavior.
-- Drag source/destination support for real file URLs in list/grid views, including folder targets. Drops copy by default. Hold Command to request a move if the source permits it. The status bar displays the action and destination before the drop. Finder owns operations dropped into Finder; inbound MacEx operations use the existing collision/cancellation engine. Native drag gestures/Finder interoperability remain an unverified release gate in this environment.
-- Sidebar shortcuts can be pinned, renamed, reordered by drag or Move Up/Down, and removed. Shortcut renaming/removal never renames/deletes the target folder. Unavailable targets remain in the sidebar and show an actionable browse error when opened.
-- Local bookmarks and atomic workspace persistence restore locations, tab groups, selected tabs, window frames, histories, view preferences, and sidebar order after quitting/relaunching. File selection and running jobs are not restored.
-- Icon cells expose selection, Open, and Quick Look accessibility actions. Native keyboard navigation remains available; a complete VoiceOver/keyboard audit is still a release gate.
-- A thin Xcode application/UI-test host and a signing/notarization script. See [docs/RELEASE.md](docs/RELEASE.md).
-
-View → Clear Thumbnail Cache clears app-owned memory caching. Thumbnails use at most two active requests, a 128-request queue, and a 64 MiB / 512-image memory cache. There is no app-owned disk thumbnail cache. Quick Look's system-managed processes/caches are outside this budget. Memory pressure clears the app cache.
-
-Workspace data is stored in `~/Library/Application Support/MacEx/workspace.json`, using regular bookmarks for direct distribution. It contains local paths/bookmarks and preferences, never extracted content or secrets. Saves are debounced, serialized, atomic, and bounded to 8 MiB. Histories retain 30 entries per direction. Unreadable/unsupported workspace data disables saving rather than overwriting the original. Small settings remain in `UserDefaults`; the separate opt-in content index uses app-private SQLite FTS5.
-
-Testing can isolate workspace persistence by adding `--state-directory /absolute/test/state/folder` when launching directly. `--folder` overrides restored windows for that launch. The UI-test host uses a separate bundle identifier and test-created state directories to avoid terminating or changing the normal MacEx session.
-
-## P2 usability update
-
-- Browser controls sit in the native title bar with the window buttons. The current folder name is the window tab title, not a second caption. Breadcrumbs still show the path.
-- Files and folders sort together by default. Sort options include a per-tab **Folders First** preference that survives relaunch. Turn it off to sort folders by the same column as files. Name, kind, and modification-date sorting apply to folders too. Kind uses names to break ties between folders. Folder sizes remain unknown (`—`), sort after known sizes in either direction, and use names to break ties; the app does not recursively scan folders to calculate sizes.
-- Open Folder controls have been removed from the sidebar, File menu, and unavailable-folder screen. Navigate using the sidebar, breadcrumbs, opening a folder, or **Go → Go to Folder…** (`⇧⌘G`). The Open With application chooser remains a system panel.
-- A first-launch File Access guide explains that macOS cannot grant access at install. Full Disk Access is the one switch for Desktop, Documents, Downloads, and other protected locations. The guide can also raise those three system prompts in one sitting. Reopen it through **MacEx → File Access…**. It never grants permissions itself or claims to detect Full Disk Access. The Settings link is a best-effort macOS URL with a System Settings fallback and manual instructions.
-
-## Search
-
-View → Search in This Folder… (`⌥⌘F`) searches the folder that is open. Spotlight runs first and is limited to that folder. The result banner says whether Spotlight had indexed items in the folder. An empty Spotlight result is not treated as “nothing matches.” Scan This Folder then checks names, extensions, kind, size, created and modified dates, and text up to 1 MiB per file. Symbolic links are not followed. Saved searches can be pinned in the sidebar. Show in Enclosing Folder returns to the file’s parent.
-
-## Cleanup review
-
-Open **Cleanup Review** in the sidebar or View menu. Choose up to 16 folders or add the current folder, then explicitly start a scan. No scan runs at launch. The dashboard shows verified duplicates, large files (editable **1024 MiB / 1 GiB** default), old Downloads (editable **90-day modification age** default, restricted to Downloads within the selected roots), and empty regular files. Empty files can be intentional placeholders or markers; candidates are never described as universally safe to delete.
-
-Duplicate detection groups independent file identities by size, optionally checks sample hashes, computes SHA-256, and compares every byte before reporting a duplicate. It compares data forks; metadata and resource forks may differ. Hard-link aliases are tracked once per inode and are review-only for cleanup. Scans reject arbitrary symlink components, exclude system locations, Library, Trash, Git internals, staging directories, packages, and nested volumes, and report permission failures and other skips. macOS's fixed `/var`, `/tmp`, and `/etc` aliases are expanded to `/private` before opening components without following links. Select nested volumes as separate roots.
-
-All deletion selections start empty. Choose a retained copy for each duplicate group, select individual candidates, and open **Review Selected…**. The review shows the exact selected/retained paths and logical/estimated allocated bytes. **Move Reviewed Files to Trash** revalidates the entire selection before starting, then revalidates each selected file and retained duplicate again at its Trash boundary. Changed/missing files stop cleanup; completed moves remain in Trash. There is no permanent-delete fallback. A new scan is required after cleanup. Hard-linked candidates cannot be selected.
-
-Allocated space is an estimate: APFS clones, snapshots, compression, hard links, and open files affect physical storage. Moving to Trash retains the data until Trash is emptied in Finder. Live writers cannot be universally frozen by file coordination; see [P4 verification](docs/P4-VERIFICATION.md) for bounds and limitations.
-
-## Secure SFTP
-
-Use **File → Connect with SFTP…** (`⌘K`) or the sidebar's Servers section. Enter host, port, username, and an absolute initial path. Authentication supports an existing `SSH_AUTH_SOCK` agent, a chosen RSA/Ed25519 private key (including supported encrypted PEM/OpenSSH keys), or a password. No SSH agent forwarding is enabled. Connection details can be saved; secrets are saved only through the explicit Keychain option after successful authentication. **Load from Keychain** and **Remove from Keychain** are explicit actions. Workspace files never contain passwords or passphrases. Keychain items are bound to server, port, username, authentication method, and selected key; editing those fields clears the form secret.
-
-MacEx checks the server key before sending credentials. Unknown keys show their SHA-256 fingerprint and require **Trust and Connect**, with Cancel as the default. Verify the fingerprint independently. Changed keys block authentication, show the saved/received fingerprints, and offer no inline trust override. **Connections → Review Saved Host Key** provides separate pin review/removal before another connection. Host/port pins are stored in app-owned `ssh-known-hosts.json`, separate from the system's SSH configuration.
-
-Remote tabs always identify the server and remote path. They support browsing, metadata, per-tab history/name filtering, non-overwriting folder creation/rename, single regular-file upload/download, progress, and cancellation. Transfer destinations use exclusive creation; existing paths are never silently replaced. New partial files remain at the chosen paths when transfers fail/cancel, and the UI identifies the operation/destination for review. Reconnect after a failed/cancelled operation. Recursive transfers, remote Trash/cleanup, terminals, background edit synchronization, jump hosts, and file promises are outside P5.
-
-**Open / Preview** on a regular remote file explicitly asks to download up to **32 MiB** into a private temporary folder. Closing the preview removes the temporary copy; no remote editing/upload synchronization occurs. Links and special files are not followed for these transfers. Downloads check metadata before/after streaming; a changing remote filesystem is not a transactional snapshot. Local source changes during upload stop the transfer and retain the source. Native SFTP servers that reject safe rename semantics report an error rather than falling back to replacement.
-
-Bundled static libssh2/OpenSSL libraries support both architectures, without a Homebrew runtime requirement. Source pins, the bounded-agent patch, build instructions, notices, and the security-update process are in [Vendor/README.md](Vendor/README.md). See [P5 verification](docs/P5-VERIFICATION.md) for tested cases and limits. Remote sessions are not reconnected automatically when the app relaunches.
-
-## Opt-in local OCR and natural-language filters
-
-Open **Local OCR & Search…** in the sidebar. Choose up to eight non-overlapping local folders, review exclusions and OCR languages, then press **Start / Resume / Reconcile**. Choosing a folder or launching the app never starts scanning. Saved roots remain inactive on relaunch. Hidden files, packages, symbolic links and paths through links are excluded; default name exclusions include `node_modules`, `.git`, `Library`, `Vendor` and `.build`. User exclusions match exact file/folder names.
-
-Vision recognizes text in supported images and scanned PDF pages; existing PDF text and supported plain text/code are extracted locally. Search uses a private SQLite FTS5 index at `~/Library/Application Support/MacEx/LocalIndex/content.sqlite`. Search covers only committed files in selected roots; results recheck live file identities and hide changed/deleted records until reconciliation. OCR can miss or misread text. Screenshots use macOS screenshot metadata, which may be absent; their filenames alone do not establish screenshot status.
-
-One utility worker checkpoints each file. Optional FSEvents invalidation and a 30-minute reconciliation refresh explicitly started sessions. Pause/Stop cancels after the current bounded request; Resume enumerates selected roots and reuses unchanged checkpoints. Battery work defaults off. Low Power Mode or serious/critical thermal pressure pauses work regardless of the battery preference. A paused resource policy requires explicit Resume. Clear Index stops monitoring and removes app-owned database files; Remove forgets a root and its indexed text. Source files are never changed. APFS snapshots, backups, OS caches and forensic erasure are outside Clear Index’s guarantees.
-
-Caps: 20,000 indexed files across all roots; 100,000 entries per pass; depth 32; 64 MiB per source; first image/frame at up to 50 megapixels, scaled to 2,048 px; first 10 PDF pages; 65,536 characters per file; approximately 512 MiB database; 500 search results. Coverage is shown per document. Framework-internal memory and a single synchronous recognition request have no hard RAM/deadline guarantee. Narrow roots when reaching a cap. Permission/provider failures retain prior checkpoints; stale paths are excluded from results. Explicitly indexing provider placeholders can cause macOS to materialize them.
-
-**Search in This Folder…** accepts a small English grammar and translates it into visible, editable folder/type/size/date/content fields before searching. Examples: `large videos in Downloads`, `screenshots containing invoice`, `modified files last week`, `downloaded files last week`. Large means at least 100,000,000 bytes. Last week means the prior calendar week in the local calendar/time zone, including daylight-saving boundaries. Downloaded uses date-added metadata, not a guaranteed download timestamp; files missing it are excluded. Unsupported words ask for refinement. Choose Spotlight, explicit folder scan, or **Search Local Index**; parsing never starts a scan or infers visual meaning.
-
-## Optional local similarity research
-
-The index window has separate **Related Text Experiment** and **Similar Images Experiment** tabs. Both require explicit session-only opt-in, use installed macOS frameworks, and make no app model download or network request. Models are OS components, not redistributed MIT-licensed weights. No account, API key, paid service or cloud provider is used.
-
-Related Text uses an available Natural Language sentence embedding and ranks text/OCR transcripts. It falls back to an actionable unavailable-model error rather than downloading assets. Similar Images compares an explicitly chosen image with indexed images using Vision feature prints. It is image-to-image similarity, not text-to-image search, visual question answering, or duplicate proof. All vectors/feature prints are transient; no vector database remains to delete.
-
-Text research considers at most the first 1,000 scoped records / 8 MiB of retained text, 4,096 characters per document, 30 seconds and 50 results. Image research compares at most 100 images from that bounded candidate set, up to 64 MiB/50 megapixels each, scaled to 512 px, for 30 seconds and 50 results. Caps are checked between framework calls. CPU time, elapsed time and process lifetime peak RSS are reported; CPU/RSS include concurrent app work. Hardware energy is not measured and no battery-life or general accuracy claim is made. See [P6 verification](docs/P6-VERIFICATION.md) and [P7 research](docs/P7-RESEARCH.md).
-
-## GitHub downloads and license
-
-MacEx's own code uses the [MIT License](LICENSE). Bundled SSH libraries retain their own licenses and notices. GitHub preview downloads include a DMG, ZIP, and SHA-256 checksums; see [distribution instructions](docs/RELEASE.md). Developer ID signing and notarization are optional future work, not current preview blockers. macOS may block a downloaded, non-notarized app initially; follow the documented per-app opening flow only after checking its source and integrity.
-
-## Keyboard shortcuts
-
-| Shortcut | Action |
-|---|---|
-| `⌘N` / `⌘T` | New window / tab |
-| `⌘K` | Connect with SFTP |
-| `⌘W` | Close current tab / window |
-| `Control-Tab` / `Control-Shift-Tab` | Next / previous tab |
-| `⌘1` / `⌘2` | Icon / list view |
-| Space | Quick Look from the file browser |
-| `⇧⌘P` | Toggle preview pane |
-| `⌃⌘T` | Pin current folder |
-| `⌘O` / `⌘↓` | Open selection |
-| `⌘↑` | Enclosing folder |
-| `⌘[` / `⌘]` | Back / forward |
-| `⇧⌘G` | Go to folder |
-| `⇧⌘N` | New folder |
-| Return | Rename one selected item |
-| `⌘C` / `⌘V` | Copy / paste |
-| `⌥⌘V` | Move items copied in MacEx here |
-| `⌥⌘C` | Copy selected paths |
-| `⌘D` | Duplicate |
-| `⌘⌫` | Move to Trash after confirmation |
-| `⇧⌘.` | Toggle hidden files |
-| `⌘F` | Focus filename filter |
-| `⌥⌘F` | Search this folder |
-| `⌘R` | Refresh |
-
-Text fields keep standard Copy/Paste behavior. Use View → Appearance to follow the system or select light/dark within MacEx.
-
-## Operation safety and limitations
-
-Existing items are never silently replaced. A conflict offers **Keep Both**, **Skip**, or **Cancel Operation**. Folder merging and replacement are not implemented. An item appearing during final publication causes an error; it is not overwritten.
-
-Copies are made in a private `.macex-copy-UUID` staging directory beside the destination, then published with an exclusive rename. The native copy callback reports current-file bytes and observes cancellation. Source metadata manifests detect ordinary changes during a copy. Cancellation preserves already committed items and removes only the current job's staging data. If cleanup fails, the operations panel identifies the remaining path.
-
-Same-volume moves use exclusive rename. **Cross-volume moves copy and SHA-256 verify the tree, revalidate it, then move the original to Trash.** This deliberately keeps the original recoverable and consumes source space until the user empties Trash. If verification or Trash fails, the source remains; partial results identify the destination copy. The UI explains this before a cross-volume move. No permanent-deletion fallback exists.
-
-File coordination does not freeze uncooperative writers. A changing filesystem cannot provide a universal all-or-nothing snapshot. Cross-volume source retention is a conservative safeguard, not a snapshot guarantee.
-
-- Symlinks are copied/moved/trashed as links. Explicit Open follows a link or resolves an alias; scans never follow links.
-- Hidden descendants are included in recursive copies. Packages are displayed as files and copied intact.
-- Named pipes, devices, and other special files are rejected before coordination; they are never opened as ordinary files.
-- Recursive operations currently cap preflight manifests at 100,000 entries and 512 levels. Split larger jobs into smaller groups.
-- Copying internal hard links may produce independent files. APFS clone/sparse-layout preservation is not promised. Byte progress describes the current file, not total allocated disk usage.
-- Native copying requests data, timestamps, permissions, ACLs, extended attributes, resource forks, and quarantine metadata. Ownership changes requiring privilege and destination-specific unsupported metadata are not guaranteed. Native failures are surfaced rather than silently accepted.
-- Explicit opens/copies can cause the OS or a cloud file provider to download a placeholder. Slow/offline providers may delay a cancellation boundary.
-- A process crash or forced termination can leave staging directories. There is no automatic recovery or automatic deletion of abandoned staging data. Review such paths manually.
-- Directory events refresh membership. Some in-place child-file edits may require `⌘R` to refresh metadata until richer event tracking is added.
-- File promises (for example, dragging a not-yet-downloaded attachment from another app) are not supported; drag actual files instead. Sidebar drag targets reorder shortcuts rather than transfer files.
-- File-operation Undo is not implemented. P1–P6 and P7’s optional local research preview are implemented; verification limits remain in [ROADMAP.md](ROADMAP.md).
-
-MacEx runs without App Sandbox in this preview, under your normal macOS account permissions. It does not elevate privileges or bypass SIP, ACLs, or privacy settings. Desktop/Documents/Downloads and volume privacy prompts occur only when those locations are accessed. Full Disk Access is not required for ordinary use. Users can optionally grant it in System Settings → Privacy & Security → Full Disk Access to cover the Files and Folders privacy checks with a broader grant. Installation cannot grant this automatically. Permission choices are managed by macOS; Developer ID releases need a stable signing identity so updates can be recognized as the same app. Ad-hoc development rebuilds can cause repeat prompts. Full Disk Access does not bypass other protections or App Sandbox restrictions. Hidden-file and appearance preferences use `UserDefaults`; the workspace does not persist file contents or credentials. Explicit local indexing stores extracted text separately; explicitly saved SSH secrets use Keychain.
-
-## Tests
-
-```sh
-zsh Scripts/test.sh
-```
-
-The wrapper adds the active toolchain's shipped Swift Testing plugin path when present. This works around a Command Line Tools / Swift Build configuration issue observed on the development machine. No packages are downloaded. `swift test` may also work with a full Xcode installation.
-
-Tests create isolated temporary fixtures. The Trash test restores only the item it created; it never enumerates or empties the user's Trash. The optional cross-volume test requires an explicitly supplied disposable mounted volume:
-
-```sh
-MACEX_TEST_VOLUME=/absolute/path/to/disposable/mount zsh Scripts/test.sh
-```
-
-That test creates/removes only its own UUID directory on that volume. It skips when the variable is absent. Do not point it at a personal folder and mistake a same-volume result for cross-volume verification.
-
-Run `zsh Scripts/test-sftp.sh` for the complete SFTP suite against disposable loopback servers, fixture keys, and a private test agent. This optional test setup installs Python test dependencies under `.build`; none are shipped or used by the app.
-
-See [P6 verification](docs/P6-VERIFICATION.md), [P7 research](docs/P7-RESEARCH.md), [P5 verification](docs/P5-VERIFICATION.md), [P4 verification](docs/P4-VERIFICATION.md) and [P3 verification](docs/P3-VERIFICATION.md) for current phase evidence. [P2 verification](docs/P2-VERIFICATION.md) records the existing public-release gaps. The original P1 report remains in [docs/VERIFICATION.md](docs/VERIFICATION.md).
-
-## Structure
-
-- `MacEx`: SwiftUI layout, native AppKit list/grid/tabs/windows, Quick Look integration, bounded thumbnails, shared jobs, and main-actor browser state.
-- `MacExCore`: directory reading, metadata, job control, file coordination, manifests, operations, workspace storage, drop policy, bounded text reading, selected-root duplicate scanning, revalidated cleanup, Vision/PDF text extraction, private SQLite FTS5 indexing, deterministic natural-language filters, and optional local similarity research.
-- `CFileOps`: small Darwin `copyfile` progress/cancellation and exclusive-rename adapter. System libraries only.
-- `Tests`: Swift Testing integration fixtures, a 10,000-entry benchmark, and Xcode-only UI fixtures.
-
-Directory work uses at most two workers. Mutations use one serial worker. Main-actor updates reject stale navigation generations. The UI uses directory events with debounce rather than polling. Hidden tabs stop their directory watcher and cancel pending reads. Volume observers are removed when a model is released. Type-icon caching is capped at 128 entries in each implementation.
+See [the 0.8.0 workflow verification](docs/P8-VERIFICATION.md) for current evidence. Earlier P1–P7 reports describe their respective engine versions and historical UI, including workflows intentionally superseded by the single-window redesign.

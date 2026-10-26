@@ -80,7 +80,8 @@ public final class FileOperations {
                     destination = Self.availableName(for: source)
                 } else {
                     guard let parent = request.destination else { throw FileFailure.message("Choose a destination folder.") }
-                    destination = parent.resolvingSymlinksInPath().appendingPathComponent(source.lastPathComponent)
+                    if let name = request.name { try DirectoryReader.validateName(name) }
+                    destination = parent.resolvingSymlinksInPath().appendingPathComponent(request.name ?? source.lastPathComponent)
                 }
                 if (request.action == .move || request.action == .rename) && source.standardizedFileURL == destination.standardizedFileURL {
                     summary.skipped.append(source); continue

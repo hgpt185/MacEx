@@ -16,6 +16,7 @@ public enum LocalFileMetadata {
         return nil
     }
     public static func isScreenshot(_ url: URL) -> Bool {
+        if DownloadProvenance.isScreenshot(url) { return true }
         guard mediaType(url) == "image", let item = MDItemCreate(nil, url.path as CFString) else { return false }
         return (MDItemCopyAttribute(item, "kMDItemIsScreenCapture" as CFString) as? NSNumber)?.boolValue == true
     }

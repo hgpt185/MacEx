@@ -14,6 +14,7 @@ final class BrowserModel: ObservableObject {
     let id: UUID
     let workspace: AppWorkspace
     var stateChanged: (() -> Void)?
+    var previewRequested: ((URL) -> Void)?
     var quickLook: (() -> Void)?
     var previewSelectionChanged: (() -> Void)?
     @Published var viewMode: BrowserViewMode = .list { didSet { stateChanged?() } }
@@ -185,33 +186,11 @@ final class BrowserModel: ObservableObject {
             if entry.identity.isSymbolicLink { target = target.resolvingSymlinksInPath() }
             let values = try target.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
             if values.isDirectory == true && values.isPackage != true { navigate(target); return }
-            if !NSWorkspace.shared.open(target) { errorMessage = "No application could open \(entry.name). Use Open With to choose a compatible application." }
-        } catch { errorMessage = "Cannot open \(entry.name): \(error.localizedDescription)" }
+            guard !FileAvailability.isOnlineOnly(target) else { errorMessage = "This file is online only. MacEx skips it to avoid downloading its contents."; return }
+            selection = [target]; showPreview = true; previewRequested?(target)
+        } catch { errorMessage = "Cannot preview \(entry.name): \(error.localizedDescription)" }
     }
-    func openWith(_ application: URL? = nil) {
-        let urls = selected.map(\.url)
-        guard !urls.isEmpty else { return }
-        if let application {
-            let configuration = NSWorkspace.OpenConfiguration(); configuration.activates = true
-            NSWorkspace.shared.open(urls, withApplicationAt: application, configuration: configuration) { [weak self] _, error in
-                if let error { Task { @MainActor [weak self] in self?.errorMessage = error.localizedDescription } }
-            }
-        } else {
-            guard let window else { return }
-            let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.canChooseFiles = true
-            panel.allowedContentTypes = [.applicationBundle]; panel.directoryURL = URL(fileURLWithPath: "/Applications")
-            panel.prompt = "Open With"
-            panel.beginSheetModal(for: window) { [weak self] response in
-                guard response == .OK, let application = panel.url else { return }
-                self?.openURLs(urls, with: application)
-            }
-        }
-    }
-    private func openURLs(_ urls: [URL], with application: URL) {
-        NSWorkspace.shared.open(urls, withApplicationAt: application, configuration: .init()) { [weak self] _, error in
-            if let error { Task { @MainActor [weak self] in self?.errorMessage = error.localizedDescription } }
-        }
-    }
+    func openWith(_ application: URL? = nil) { openSelection() }
     func pinCurrentFolder() { workspace.pin(location) }
     func pinSelectedFolders() { for entry in selected where entry.isFolder { workspace.pin(entry.url) } }
     func openShortcut(_ shortcut: SidebarShortcut) {
@@ -250,15 +229,13 @@ final class BrowserModel: ObservableObject {
     }
     func duplicate() { run(OperationRequest(.duplicate, sources: selected.map(\.url))) }
     func trash() {
-        guard !selected.isEmpty, !busy, let window else { return }
+        guard !selected.isEmpty, !busy else { return }
         let urls = selected.map(\.url)
-        let alert = NSAlert(); alert.messageText = "Move \(urls.count == 1 ? "\"\(urls[0].lastPathComponent)\"" : "\(urls.count) items") to Trash?"
-        alert.informativeText = "Items will be moved to Trash. If this volume does not support Trash, the operation will stop."
-        alert.addButton(withTitle: "Move to Trash"); alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [weak self] response in
-            if response == .alertFirstButtonReturn { self?.run(OperationRequest(.trash, sources: urls)) }
+        workspace.interaction.confirm("Move \(urls.count) item(s) to Trash?", message: "Items remain recoverable. A volume without Trash stops the operation.", button: "Move to Trash") { [weak self] approved in
+            if approved { self?.run(OperationRequest(.trash, sources: urls)) }
         }
     }
+
     func copySelection() {
         clipboardURLs = selected.map(\.url)
         guard !clipboardURLs.isEmpty else { return }
@@ -279,16 +256,11 @@ final class BrowserModel: ObservableObject {
         do { try DropPolicy.validate(sources: urls, destination: destination) }
         catch { errorMessage = error.localizedDescription; return }
         let request = OperationRequest(move ? .move : .copy, sources: urls, destination: destination)
-        if move, let destinationIdentity = try? FileIdentity(destination),
-           urls.contains(where: { (try? FileIdentity($0).device) != destinationIdentity.device }), let window {
-            let alert = NSAlert(); alert.messageText = "Move between volumes?"
-            alert.informativeText = "MacEx will copy and verify the contents, then move each original to Trash. Originals remain recoverable and use space until Trash is emptied. If Trash is unavailable, the source stays in place."
-            alert.addButton(withTitle: "Move"); alert.addButton(withTitle: "Cancel")
-            alert.beginSheetModal(for: window) { [weak self] response in
-                if response == .alertFirstButtonReturn { self?.run(request) }
-            }
+        if move, let identity = try? FileIdentity(destination), urls.contains(where: { (try? FileIdentity($0).device) != identity.device }) {
+            workspace.interaction.confirm("Move between volumes?", message: "MacEx copies and verifies contents, then moves originals to Trash. Originals remain recoverable and consume space until Trash is emptied.", button: "Move") { [weak self] approved in if approved { self?.run(request) } }
         } else { run(request) }
     }
+
     func copyPaths() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(selected.map(\.url.path).joined(separator: "\n"), forType: .string)
@@ -301,20 +273,12 @@ final class BrowserModel: ObservableObject {
     }
     func cancelJob() { workspace.jobs.cancel() }
     func resolveConflict(_ url: URL, control: JobControl) async {
-        guard let window else { control.cancel(); return }
-        let alert = NSAlert(); alert.messageText = "An item named \"\(url.lastPathComponent)\" already exists."
-        alert.informativeText = "\(url.deletingLastPathComponent().path)\nKeep Both creates a different name. Existing files and folders will not be replaced or merged."
-        alert.addButton(withTitle: "Keep Both"); alert.addButton(withTitle: "Skip"); alert.addButton(withTitle: "Cancel Operation")
-        let response = await alert.beginSheetModal(for: window)
-        control.resolve(response == .alertFirstButtonReturn ? .keepBoth : response == .alertSecondButtonReturn ? .skip : .cancel)
+        await withCheckedContinuation { continuation in
+            workspace.interaction.conflict(url) { decision in control.resolve(decision); continuation.resume() }
+        }
     }
     private func prompt(title: String, message: String, initial: String, button: String, completion: @escaping @MainActor (String) -> Void) {
-        guard let window else { return }
-        let alert = NSAlert(); alert.messageText = title; alert.informativeText = message
-        let field = NSTextField(string: initial); field.frame = NSRect(x: 0, y: 0, width: 380, height: 24)
-        alert.accessoryView = field; alert.addButton(withTitle: button); alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = field
-        alert.beginSheetModal(for: window) { response in if response == .alertFirstButtonReturn { completion(field.stringValue) } }
+        workspace.interaction.ask(title, message: message, initial: initial, button: button) { value in if let value { completion(value) } }
     }
 
     func showIndexedResults(_ documents: [IndexedDocument], summary: String) {

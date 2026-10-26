@@ -36,19 +36,8 @@ final class FileMenuActions: NSObject {
             let item = NSMenuItem(title: title, action: selector, keyEquivalent: ""); item.target = self; item.isEnabled = enabled; menu.addItem(item)
         }
         if !model.selection.isEmpty {
-            add("Open", #selector(open))
-            let with = NSMenuItem(title: "Open With", action: nil, keyEquivalent: "")
-            let applications = NSMenu(); applications.autoenablesItems = false
-            if let first = model.selected.first {
-                for application in NSWorkspace.shared.urlsForApplications(toOpen: first.url).prefix(12) {
-                    let item = NSMenuItem(title: application.deletingPathExtension().lastPathComponent, action: #selector(openApplication(_:)), keyEquivalent: "")
-                    item.target = self; item.representedObject = application; applications.addItem(item)
-                }
-            }
-            if !applications.items.isEmpty { applications.addItem(.separator()) }
-            let other = NSMenuItem(title: "Other…", action: #selector(openOther), keyEquivalent: ""); other.target = self
-            applications.addItem(other); with.submenu = applications; menu.addItem(with)
-            add("Quick Look", #selector(quickLook))
+            add("Preview", #selector(open))
+            add("Preview in MacEx", #selector(quickLook))
             if model.searchActive && model.selection.count == 1 { add("Show in Enclosing Folder", #selector(revealParent)) }
             menu.addItem(.separator())
             add("Rename…", #selector(rename), enabled: model.selection.count == 1 && !model.busy)

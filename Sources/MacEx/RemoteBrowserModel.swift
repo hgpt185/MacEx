@@ -90,14 +90,11 @@ final class RemoteBrowserModel: ObservableObject {
         }
     }
     private func confirmHost(_ key: SSHHostKey) async -> Bool {
-        guard let window else { return false }
-        return await withCheckedContinuation { continuation in
-            let alert = NSAlert(); alert.messageText = "Verify \(connection.host):\(connection.port)"
-            alert.informativeText = "This server is not in MacEx's saved host keys. Verify this fingerprint through a separate trusted source before connecting.\n\n\(key.algorithm)\n\(key.fingerprint)\n\nNo credentials have been sent."
-            alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Trust and Connect")
-            alert.beginSheetModal(for: window) { response in continuation.resume(returning: response == .alertSecondButtonReturn) }
+        await withCheckedContinuation { continuation in
+            workspace.interaction.confirm("Verify \(connection.host):\(connection.port)", message: "Verify this fingerprint independently. No credentials have been sent.\n\n\(key.algorithm)\n\(key.fingerprint)", button: "Trust and Connect") { continuation.resume(returning: $0) }
         }
     }
+
     func cancel() { client?.cancel(); status = "Stopping… Partial transfer files may remain at the chosen paths." }
     func disconnect() {
         guard !busy else { cancel(); return }
@@ -158,43 +155,33 @@ final class RemoteBrowserModel: ObservableObject {
         self?.perform("Rename \(entry.name)") { try $0.rename(entry.path, to: name) }
     } }
     func upload() {
-        guard !busy, connected, let window else { return }
-        let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.canChooseFiles = true
-        panel.resolvesAliases = false; panel.allowsMultipleSelection = false; panel.prompt = "Choose File"
-        panel.beginSheetModal(for: window) { [weak self] response in
-            guard response == .OK, let self, let local = panel.url else { return }
+        guard !busy, connected else { return }
+        workspace.interaction.choose("Choose a local file to upload", folder: false) { [weak self] local in
+            guard let self, let local else { return }
             self.prompt("Upload As", initial: local.lastPathComponent) { [weak self] name in
                 guard let self else { return }
-                do {
-                    let remote = try RemotePath.appending(name, to: path); let report = progress()
-                    perform("Upload to \(remote)") { try $0.upload(local, to: remote, progress: report) }
-                } catch { status = error.localizedDescription }
+                do { let remote = try RemotePath.appending(name, to: self.path); let report = self.progress(); self.perform("Upload to \(remote)") { try $0.upload(local, to: remote, progress: report) } }
+                catch { self.status = error.localizedDescription }
             }
         }
     }
+
     func download() {
-        guard !busy, connected, let entry = selected, entry.isRegular, let window else { return }
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false; panel.prompt = "Download Here"
-        panel.beginSheetModal(for: window) { [weak self] response in
-            guard response == .OK, let self, let directory = panel.url else { return }
+        guard !busy, connected, let entry = selected, entry.isRegular else { return }
+        workspace.interaction.choose("Choose a download destination", folder: true) { [weak self] directory in
+            guard let self, let directory else { return }
             self.prompt("Download As", initial: entry.name) { [weak self] name in
                 guard let self else { return }
-                do {
-                    try RemotePath.validateName(name)
-                    let local = directory.appendingPathComponent(name); let report = progress()
-                    perform("Download to \(local.path)") { try $0.download(entry.path, to: local, progress: report) }
-                } catch { status = error.localizedDescription }
+                do { try RemotePath.validateName(name); let local = directory.appendingPathComponent(name); let report = self.progress(); self.perform("Download to \(local.path)") { try $0.download(entry.path, to: local, progress: report) } }
+                catch { self.status = error.localizedDescription }
             }
         }
     }
+
     func previewSelected() {
-        guard !busy, connected, let client, let entry = selected, entry.isRegular, let window else { return }
-        let alert = NSAlert(); alert.messageText = "Download for Preview?"
-        alert.informativeText = "Download up to 32 MiB from \(connection.identity)\(entry.path) into a private temporary folder. No upload or edit synchronization occurs. Close the preview to remove this temporary copy."
-        alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Download for Preview")
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertSecondButtonReturn, let self else { return }
+        guard !busy, connected, let client, let entry = selected, entry.isRegular else { return }
+        workspace.interaction.confirm("Download for preview?", message: "Download up to 32 MiB from \(connection.identity)\(entry.path) into a private temporary folder. Closing the preview removes its copy.", button: "Download for Preview") { [weak self] approved in
+            guard approved, let self else { return }
             self.clearPreview()
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MacEx-SFTP-\(UUID().uuidString)")
             let local = directory.appendingPathComponent(entry.name)
@@ -222,12 +209,7 @@ final class RemoteBrowserModel: ObservableObject {
         }
     }
     private func prompt(_ title: String, initial: String, completion: @escaping @MainActor (String) -> Void) {
-        guard !busy, connected, let window else { return }
-        let alert = NSAlert(); alert.messageText = title
-        alert.informativeText = "Existing files are never replaced. New partial transfer files may remain if a transfer stops."
-        let field = NSTextField(string: initial); field.frame = NSRect(x: 0, y: 0, width: 420, height: 24)
-        alert.accessoryView = field; alert.addButton(withTitle: "Continue"); alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = field
-        alert.beginSheetModal(for: window) { response in if response == .alertFirstButtonReturn { completion(field.stringValue) } }
+        guard !busy, connected else { return }
+        workspace.interaction.ask(title, message: "Existing files are never replaced. Partial transfer files remain for review if interrupted.", initial: initial) { value in if let value { completion(value) } }
     }
 }

@@ -23,6 +23,7 @@ jobs:
         run: zsh Scripts/package-release.sh --prepare
       - name: Verify bundle and download checksums
         run: |
+          test -d dist/release/MacEx.app/Contents/Resources/Metadata.appintents
           codesign --verify --strict --verbose=2 dist/release/MacEx.app
           python3 -c 'import subprocess; assert sorted(subprocess.check_output(["lipo", "-archs", "dist/release/MacEx.app/Contents/MacOS/MacEx"], text=True).split()) == ["arm64", "x86_64"]'
           cd dist

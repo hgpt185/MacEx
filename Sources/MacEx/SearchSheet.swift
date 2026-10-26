@@ -28,6 +28,7 @@ struct SearchFields {
 
 struct SearchSheet: View {
     @ObservedObject var model: BrowserModel
+    var onClose: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -36,7 +37,7 @@ struct SearchSheet: View {
             if !model.workspace.savedSearches.isEmpty {
                 Menu("Saved Searches") {
                     ForEach(model.workspace.savedSearches) { search in
-                        Button(search.title) { dismiss(); model.runSavedSearch(search) }
+                        Button(search.title) { close(); model.runSavedSearch(search) }
                         Button(search.pinned ? "Unpin \(search.title)" : "Pin \(search.title)") {
                             model.workspace.setSearchPinned(search.id, pinned: !search.pinned)
                         }
@@ -81,7 +82,7 @@ struct SearchSheet: View {
                 Button("Scan This Folder") { submit(scan: true) }
                 Button("Search Local Index") { submitIndex() }
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { close() }.keyboardShortcut(.cancelAction)
             }
             Text("Local Index uses whole-word/phrase matching and only committed checkpoints from explicitly indexed folders.").font(.caption).foregroundStyle(.secondary)
             Divider()
@@ -131,14 +132,14 @@ struct SearchSheet: View {
         } catch { model.searchFields.message = error.localizedDescription }
     }
     private func submitIndex() {
-        do { let r = try request(); dismiss(); model.searchLocalIndex(r) }
+        do { let r = try request(); close(); model.searchLocalIndex(r) }
         catch { model.searchFields.message = error.localizedDescription }
     }
     private func submit(scan: Bool) {
         do {
             let request = try request()
             model.searchFields.message = nil
-            dismiss()
+            close()
             if scan { model.scan(request) } else { model.searchSpotlight(request) }
         } catch { model.searchFields.message = error.localizedDescription }
     }
@@ -152,4 +153,6 @@ struct SearchSheet: View {
             model.searchFields.message = model.searchFields.pinned ? "Pinned in the sidebar." : "Saved."
         } catch { model.searchFields.message = error.localizedDescription }
     }
+    private func close() { if let onClose { onClose() } else { dismiss() } }
+
 }

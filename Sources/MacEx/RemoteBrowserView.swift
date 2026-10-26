@@ -55,34 +55,17 @@ struct RemoteBrowserView: View {
             }.padding(12)
             Text("Remote files · Uploads/downloads create new files only · Partial transfers are retained for review · No remote Trash or cleanup")
                 .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 12)
-        }.frame(minWidth: 950, minHeight: 560)
-            .sheet(isPresented: $model.showConnections) { ConnectionSheet(workspace: model.workspace, knownHosts: model.knownHosts, initial: model.connection) }
-            .sheet(isPresented: $model.showPreview, onDismiss: { model.clearPreview() }) {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack { Text("Downloaded Preview · \(model.connection.identity)").font(.headline); Spacer(); Button("Close") { model.showPreview = false } }
-                    if let url = model.previewURL { SystemPreview(url: url) }
-                    Text("Temporary copy, bounded to 32 MiB. Close to remove it. Remote edits are not synchronized.").font(.caption).foregroundStyle(.secondary)
-                }.padding(18).frame(width: 740, height: 560)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            .overlay {
+                if model.showConnections { ScrollView { ConnectionSheet(workspace: model.workspace, knownHosts: model.knownHosts, initial: model.connection, onClose: { model.showConnections = false }) }.background(.background) }
+                else if model.showPreview, let url = model.previewURL {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack { Text("Downloaded preview · \(model.connection.identity)"); Spacer(); Button("Close Preview") { model.clearPreview() } }
+                        SystemPreview(url: url)
+                        Text("Temporary copy, up to 32 MiB. Close to remove it.").font(.caption)
+                    }.padding(20).background(.background)
+                }
             }
     }
-}
-
-@MainActor
-final class RemoteWindowController: NSWindowController, NSWindowDelegate {
-    let model: RemoteBrowserModel
-    var onClose: (() -> Void)?
-    init(model: RemoteBrowserModel) {
-        self.model = model
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false; window.minSize = NSSize(width: 950, height: 600)
-        window.tabbingIdentifier = "MacExBrowser"; window.tabbingMode = .preferred
-        super.init(window: window); window.delegate = self; model.window = window
-        window.contentView = NSHostingView(rootView: RemoteBrowserView(model: model)); model.syncTitle(); window.center()
-    }
-    required init?(coder: NSCoder) { nil }
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if model.busy { model.status = "A remote operation is running. Cancel it and wait before closing this tab."; return false }
-        return true
-    }
-    func windowWillClose(_ notification: Notification) { model.disconnect(); model.clearPreview(); let completion = onClose; Task { @MainActor in completion?() } }
 }

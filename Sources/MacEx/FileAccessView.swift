@@ -20,7 +20,7 @@ struct FileAccessView: View {
                 Text("Open System Settings, add this copy of MacEx under Privacy & Security → Full Disk Access, and turn it on. Quit and reopen MacEx if macOS asks.")
                 Text("This is a broad permission. macOS still enforces other protections. MacEx cannot turn the switch on for you, and you can turn it off later in Settings.")
                     .foregroundStyle(.secondary)
-                Button("Open Full Disk Access Settings…") { openSettings() }
+                Text("Open System Settings manually → Privacy & Security → Full Disk Access if needed. MacEx keeps its file workflow in this window.").textSelection(.enabled)
                 if state.settingsError { Text("Open System Settings manually, then choose Privacy & Security → Full Disk Access.").foregroundStyle(.orange) }
             }.padding(16).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 8) {
@@ -37,13 +37,6 @@ struct FileAccessView: View {
         }.font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
             .padding(28).frame(width: 540)
             .onDisappear { UserDefaults.standard.set(true, forKey: "fileAccessChoiceSeen") }
-    }
-
-    private func openSettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")!
-        if !NSWorkspace.shared.open(url) {
-            state.settingsError = !NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
-        }
     }
 
     private func requestStandardFolders() {

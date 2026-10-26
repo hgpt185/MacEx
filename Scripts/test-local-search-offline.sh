@@ -28,4 +28,4 @@ sandbox-exec -p '(version 1)(allow default)(deny network*)' /usr/bin/env \
   DYLD_FRAMEWORK_PATH="$runtime_frameworks" DYLD_LIBRARY_PATH="$runtime_libraries" "$testing_helper" \
   --test-bundle-path "$test_binary" \
   --testing-library swift-testing \
-  --filter 'natural|mediaAndScreenshot|index|actualVision|semantic|actualFolderEvents|imageSimilarity|corruptIndex'
+  --filter 'natural|mediaAndScreenshot|index|actualVision|semantic|actualFolderEvents|imageSimilarity|corruptIndex|library|sourceMetadata|boundedPreviewBytes|reviewedLibrary|moveCanRestore'

@@ -64,6 +64,25 @@ public enum JobEvent: Sendable {
 
 public enum OperationQueue {
     private static let queue = DispatchQueue(label: "app.macex.mutations", qos: .userInitiated)
+    public static func startLibraryCleanup(_ review: LibraryTrashReview, control: JobControl) -> AsyncStream<JobEvent> {
+        AsyncStream { continuation in
+            queue.async {
+                var result = JobSummary()
+                do {
+                    try review.validate()
+                    for file in review.selected {
+                        try control.checkCancellation()
+                        for retained in review.retained { try retained.revalidate() }
+                        try file.revalidate()
+                        let item = FileOperations().perform(OperationRequest(.trash, sources: [file.url]), control: control) { continuation.yield($0) }
+                        result.completed += item.completed; result.errors += item.errors; result.skipped += item.skipped; result.cancelled = item.cancelled
+                        if item.cancelled || !item.errors.isEmpty { break }
+                    }
+                } catch { result.cancelled = control.isCancelled; result.errors.append(error.localizedDescription) }
+                continuation.yield(.finished(result)); continuation.finish()
+            }
+        }
+    }
     public static func startCleanup(_ review: CleanupReview, control: JobControl) -> AsyncStream<JobEvent> {
         AsyncStream { continuation in
             queue.async {
