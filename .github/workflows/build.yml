@@ -22,7 +22,7 @@ jobs:
       - name: Verify the single-window UI with Xcode
         run: |
           xcodebuild -project MacEx.xcodeproj -scheme MacEx -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath .build/ui-tests \
+            -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/ui-tests \
             -resultBundlePath .build/single-window.xcresult test
       - name: Prepare universal GitHub preview without notarization
         run: zsh Scripts/package-release.sh --prepare

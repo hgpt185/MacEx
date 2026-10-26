@@ -257,9 +257,11 @@ final class LibraryModel: ObservableObject {
     }
     func scheduleRefresh() { refreshTask?.cancel(); refreshTask = Task { [weak self] in do { try await Task.sleep(for: .seconds(3)) } catch { return }; self?.refresh() } }
     func cancelScan() { scanControl?.cancel(); workspace.localIndex.stop() }
-    func show(_ destination: LibraryRoute) { searchTask?.cancel(); ocrToken = UUID(); searchingText = false; route = destination; searchText = ""; filters = LibraryQuery(); selected = []; previewURL = nil; cleanupReview = false; cleanupSelection = []; sourceFilter = "" }
+    private func dismissPriorPages() { browser.showConnections = false; browser.showIndex = false; browser.showCleanup = false; browser.showSearch = false }
+    func show(_ destination: LibraryRoute) { dismissPriorPages(); searchTask?.cancel(); ocrToken = UUID(); searchingText = false; route = destination; searchText = ""; filters = LibraryQuery(); selected = []; previewURL = nil; cleanupReview = false; cleanupSelection = []; sourceFilter = "" }
     func search(_ phrase: String) {
         let phrase = String(phrase.prefix(500))
+        dismissPriorPages(); sourceFilter = ""
         searchText = phrase; filters = LibraryQuery.parse(phrase); if filters.folder == "downloads" { filters.folder = settings.downloadsPath }; route = .search; previewURL = nil; selected = []
         searchOCR()
     }

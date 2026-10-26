@@ -12,6 +12,7 @@ let package = Package(
         .target(name: "CSFTP", dependencies: ["SSHDependencies"], publicHeadersPath: "include"),
         .target(name: "MacExCore", dependencies: ["CFileOps", "CSFTP", "CSQLite"]),
         .executableTarget(name: "MacEx", dependencies: ["MacExCore"]),
-        .testTarget(name: "MacExCoreTests", dependencies: ["MacExCore"])
+        .testTarget(name: "MacExCoreTests", dependencies: ["MacExCore"]),
+        .testTarget(name: "MacExAppTests", dependencies: ["MacEx"])
     ]
 )

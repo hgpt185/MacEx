@@ -21,6 +21,7 @@ def configs(name, settings):
     for mode in ("Debug", "Release"):
         values = dict(settings)
         values.update({"SWIFT_OPTIMIZATION_LEVEL": "-Onone" if mode == "Debug" else "-O",
+                       "ONLY_ACTIVE_ARCH": "YES" if mode == "Debug" else "NO",
                        "ENABLE_HARDENED_RUNTIME": "NO" if mode == "Debug" else "YES"})
         ids.append(add(name + mode, "isa = XCBuildConfiguration; name = " + mode + "; buildSettings = {" +
                        " ".join(q(k) + " = " + q(v) + ";" for k, v in values.items()) + "};"))
