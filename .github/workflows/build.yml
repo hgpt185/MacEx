@@ -22,7 +22,7 @@ jobs:
       - name: Verify bundle and download checksums
         run: |
           codesign --verify --strict --verbose=2 dist/release/MacEx.app
-          lipo -verify_arch arm64 x86_64 dist/release/MacEx.app/Contents/MacOS/MacEx
+          lipo dist/release/MacEx.app/Contents/MacOS/MacEx -verify_arch arm64 x86_64
           cd dist
           shasum -a 256 -c MacEx-*-SHA256SUMS.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
