@@ -19,6 +19,11 @@ jobs:
         run: zsh Scripts/test-sftp.sh
       - name: Verify local search with network sockets denied
         run: zsh Scripts/test-local-search-offline.sh
+      - name: Verify the single-window UI with Xcode
+        run: |
+          xcodebuild -project MacEx.xcodeproj -scheme MacEx -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath .build/ui-tests \
+            -resultBundlePath .build/single-window.xcresult test
       - name: Prepare universal GitHub preview without notarization
         run: zsh Scripts/package-release.sh --prepare
       - name: Verify bundle and download checksums

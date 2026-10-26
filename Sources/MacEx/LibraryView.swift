@@ -44,7 +44,7 @@ struct SingleWindowView: View {
                         } else {
                             HSplitView {
                                 workspacePage
-                                if model.previewURL != nil || model.inspector { LibraryInspector(model: model).frame(minWidth: 260, idealWidth: 390, maxWidth: 650) }
+                                if model.previewURL != nil || model.inspector { LibraryInspector(model: model).frame(minWidth: 340, idealWidth: 390, maxWidth: 650) }
                             }
                         }
                     }
@@ -233,7 +233,8 @@ struct SingleWindowView: View {
             HStack { Text(model.route.title).font(.system(size: 26, weight: .semibold)); Text("\(model.items.count)").foregroundStyle(.secondary); Spacer(); if model.route == .search { Button("Save Search", action: model.saveSearch).disabled(model.searchText.isEmpty) }; viewControls }
             if model.route == .search { chips; filterEditor }
             if !model.sources.isEmpty { HStack { Picker("From", selection: $model.sourceFilter) { Text("Any source").tag(""); ForEach(model.sources, id: \.0) { Text($0.0).tag($0.0) } }.frame(maxWidth: 250); Spacer(); if !model.selected.isEmpty { Button("Copy Text") { model.copyText() }; Button("Move to Trash…") { model.prepareTrash(model.snapshot.items.filter { model.selected.contains($0.path) }) } } } }
-            if model.items.isEmpty { ContentUnavailableView(model.settings.roots.isEmpty ? "Add your folders" : "No matching files", systemImage: "magnifyingglass", description: Text("Filters use the available library metadata and recognized text. Missing camera, source or date metadata is excluded by those filters.")) }
+            if model.searchingText { HStack { ProgressView().controlSize(.small); Text("Searching recognized text…").font(.caption).foregroundStyle(.secondary) } }
+            if model.items.isEmpty && !model.searchingText { ContentUnavailableView(model.settings.roots.isEmpty ? "Add your folders" : "No matching files", systemImage: "magnifyingglass", description: Text("Filters use the available library metadata and recognized text. Missing camera, source or date metadata is excluded by those filters.")) }
             else if browser.viewMode == .list {
                 Table(model.items, selection: $model.selected) {
                     TableColumn("Name") { item in HStack { LibraryThumbnail(url: item.url, symbol: item.kind.symbol).frame(width: 28, height: 28); Text(item.name) }.onTapGesture(count: 2) { model.preview(item.url) } }.width(min: 170)
@@ -324,7 +325,10 @@ struct SingleWindowView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack { Text("Trash").font(.largeTitle).bold(); Spacer(); Button("Browse Trash Folder") { model.openFolder(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash")) } }
             Text("Restore files moved to Trash by MacEx. Original names and folders are retained in this local history. Existing destinations are never overwritten.").foregroundStyle(.secondary).font(.callout)
-            List(model.trashHistory) { item in HStack { VStack(alignment: .leading, spacing: 4) { Text(URL(fileURLWithPath: item.originalPath).lastPathComponent); Text(item.originalPath).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }; Spacer(); Button("Restore") { model.restore(item) }.disabled(browser.busy) } }
+            ScrollView { LazyVStack(spacing: 12) { ForEach(model.trashHistory) { item in
+                HStack { VStack(alignment: .leading, spacing: 4) { Text(URL(fileURLWithPath: item.originalPath).lastPathComponent); Text(item.originalPath).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }; Spacer(); Button("Restore") { model.restore(item) }.disabled(browser.busy) }
+                    .padding(16).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+            } } }
             if model.trashHistory.isEmpty { Text("No MacEx Trash history yet.").foregroundStyle(.secondary) }
         }.padding(26)
     }

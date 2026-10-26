@@ -96,16 +96,18 @@ private struct UpdateSettingsView: View {
     @Published var running = false
     @Published var distance = 0.22
     @Published var status = "Compare local photos with Vision. Similarity is not proof of duplicate content."
-    let control = JobControl()
+    private var control: JobControl?
     func scan(_ items: [LibraryFile]) {
         guard !running else { return }; running = true
         let distance = Float(distance)
+        let control = JobControl(); self.control = control
         Task {
-            do { groups = try await Task.detached(priority: .utility) { try SimilarPhotos.scan(items, threshold: distance, control: JobControl()) }.value; status = "\(groups.count) look-alike groups from at most 100 local images / 30 seconds. Compare originals and retain the edits you need." }
+            do { groups = try await Task.detached(priority: .utility) { try SimilarPhotos.scan(items, threshold: distance, control: control) }.value; status = "\(groups.count) look-alike groups from at most 100 local images / 30 seconds. Compare originals and retain the edits you need." }
             catch { status = error.localizedDescription }
-            running = false
+            running = false; self.control = nil
         }
     }
+    func cancel() { control?.cancel() }
 }
 struct SimilarPhotosView: View {
     @ObservedObject var model: LibraryModel
@@ -115,7 +117,7 @@ struct SimilarPhotosView: View {
             HStack { Text("Similar Photos").font(.largeTitle).bold(); Spacer(); Button("Find Look-alikes") { state.scan(model.snapshot.items) }.disabled(state.running) }
             Text(state.status).font(.callout).foregroundStyle(.secondary)
             HStack { Text("Similarity distance"); Slider(value: $state.distance, in: 0.01...0.5); Text(String(format: "%.2f", state.distance)).monospacedDigit() }
-            if state.running { ProgressView() }
+            if state.running { HStack { ProgressView().controlSize(.small); Button("Cancel", action: state.cancel) } }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     ForEach(state.groups) { group in
@@ -131,6 +133,6 @@ struct SimilarPhotosView: View {
                 guard state.groups.allSatisfy({ group in !group.items.allSatisfy { selected.contains($0.path) } }) else { state.status = "Keep at least one photo from each selected group."; return }
                 model.prepareTrash(state.groups.flatMap(\.items).filter { selected.contains($0.path) }, retaining: state.groups.compactMap { $0.items.first { !selected.contains($0.path) } })
             }.disabled(model.cleanupSelection.isEmpty || state.running) }
-        }.padding(26)
+        }.padding(26).onDisappear { state.cancel() }
     }
 }

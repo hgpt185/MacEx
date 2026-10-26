@@ -8,7 +8,7 @@ final class CleanupModel: ObservableObject {
     @Published var largeMiB = "1024"
     @Published var oldDays = "90"
     @Published var sampleHashes = true
-    @Published var category: CleanupCategory = .duplicates { didSet { selected = []; review = nil } }
+    @Published var category: CleanupCategory = .duplicates { didSet { if category != oldValue { selected = []; review = nil } } }
     @Published var scan: CleanupScan?
     @Published var running = false
     @Published var status = "Choose folders, then start a scan. No folders are scanned automatically."

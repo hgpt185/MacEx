@@ -72,6 +72,7 @@ struct LibraryInspector: View {
                     else if let text = state.text { ScrollView { Text(text).font(.system(size: 12, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(16) } }
                     else if let data = state.data, url.pathExtension.lowercased() == "pdf" { EmbeddedPDF(data: data) }
                     else if let data = state.data, let source = CGImageSourceCreateWithData(data as CFData, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 2048, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) { Image(decorative: image, scale: 1).resizable().scaledToFit().padding(14) }
+                    else if model.activeItem?.kind == .music { VStack(spacing: 12) { Image(systemName: "waveform").font(.system(size: 55)).foregroundStyle(.secondary); Text("Use the player at the bottom of your library.").font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center) }.padding(20) }
                     else if state.video.currentItem != nil { EmbeddedVideo(player: state.video) }
                     else { ContentUnavailableView("Preview", systemImage: "doc", description: Text(state.error ?? "Select a file.")) }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -111,10 +112,37 @@ private struct EmbeddedPDF: NSViewRepresentable {
     func makeNSView(context: Context) -> PDFView { let view = InlinePDFView(); view.autoScales = true; view.document = PDFDocument(data: data); context.coordinator.data = data; return view }
     func updateNSView(_ view: PDFView, context: Context) { if context.coordinator.data != data { view.document = PDFDocument(data: data); context.coordinator.data = data } }
 }
-private struct EmbeddedVideo: NSViewRepresentable {
+private struct EmbeddedVideo: View {
     let player: AVPlayer
-    func makeNSView(context: Context) -> AVPlayerView { let view = AVPlayerView(); view.player = player; view.controlsStyle = .inline; view.showsFullScreenToggleButton = false; view.allowsPictureInPicturePlayback = false; return view }
-    func updateNSView(_ view: AVPlayerView, context: Context) { view.player = player }
+    var body: some View {
+        VStack(spacing: 0) {
+            InlineVideoSurface(player: player).frame(maxWidth: .infinity, maxHeight: .infinity)
+            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                let seconds = player.currentTime().seconds
+                let length = player.currentItem?.duration.seconds ?? 0
+                let duration = length.isFinite && length > 0 ? length : 0
+                let position = seconds.isFinite ? min(max(seconds, 0), duration) : 0
+                HStack(spacing: 10) {
+                    Button {
+                        if player.rate != 0 { player.pause() }
+                        else { if duration > 0 && position >= duration - 0.1 { player.seek(to: .zero) }; player.play() }
+                    } label: { Image(systemName: player.rate == 0 ? "play.fill" : "pause.fill") }
+                        .accessibilityLabel(player.rate == 0 ? "Play preview" : "Pause preview")
+                    Slider(value: Binding(get: { position }, set: { player.seek(to: CMTime(seconds: $0, preferredTimescale: 600)) }), in: 0...max(duration, 1)).disabled(duration == 0).accessibilityLabel("Preview position")
+                    Text("\(Int(position) / 60):\(String(format: "%02d", Int(position) % 60))").font(.caption.monospacedDigit())
+                }.padding(12).background(.bar)
+            }
+        }
+    }
+}
+private struct InlineVideoSurface: NSViewRepresentable {
+    let player: AVPlayer
+    final class Surface: NSView {
+        override func makeBackingLayer() -> CALayer { AVPlayerLayer() }
+        override func menu(for event: NSEvent) -> NSMenu? { nil }
+    }
+    func makeNSView(context: Context) -> Surface { let view = Surface(); view.wantsLayer = true; (view.layer as? AVPlayerLayer)?.player = player; return view }
+    func updateNSView(_ view: Surface, context: Context) { (view.layer as? AVPlayerLayer)?.player = player }
 }
 
 struct InlineDuplicates: View {

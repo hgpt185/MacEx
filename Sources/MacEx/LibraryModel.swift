@@ -66,6 +66,7 @@ final class LibraryModel: ObservableObject {
     @Published var inspector = false
     @Published var status = "Add folders to build your library. Your files stay on this Mac."
     @Published var scanning = false
+    @Published private(set) var searchingText = false
     @Published var transcript = ""
     @Published var extracting = false
     @Published var selectText = false
@@ -94,7 +95,7 @@ final class LibraryModel: ObservableObject {
     private var watcher: IndexEvents?
     private var refreshTask: Task<Void, Never>?
     private var timer: Timer?
-    private var ocrMatches = Set<String>()
+    @Published private var ocrMatches = Set<String>()
     private var ocrToken = UUID()
     private var transcriptToken = UUID()
     var onShow: (() -> Void)?
@@ -155,6 +156,13 @@ final class LibraryModel: ObservableObject {
         browser.stateChanged = { [weak self] in self?.objectWillChange.send() }
         workspace.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         workspace.jobs.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
+        workspace.localIndex.$running.dropFirst().removeDuplicates().sink { [weak self] running in
+            guard !running else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.route == .search, !self.filters.text.isEmpty else { return }
+                self.searchOCR()
+            }
+        }.store(in: &subscriptions)
         workspace.jobs.$summary.sink { [weak self] summary in
             guard let self, let summary else { return }; let action = self.workspace.jobs.action
             Task { @MainActor [weak self] in self?.recordTrash(summary, action: action) }
@@ -249,18 +257,20 @@ final class LibraryModel: ObservableObject {
     }
     func scheduleRefresh() { refreshTask?.cancel(); refreshTask = Task { [weak self] in do { try await Task.sleep(for: .seconds(3)) } catch { return }; self?.refresh() } }
     func cancelScan() { scanControl?.cancel(); workspace.localIndex.stop() }
-    func show(_ destination: LibraryRoute) { route = destination; searchText = ""; filters = LibraryQuery(); selected = []; previewURL = nil; cleanupReview = false; cleanupSelection = []; sourceFilter = "" }
+    func show(_ destination: LibraryRoute) { searchTask?.cancel(); ocrToken = UUID(); searchingText = false; route = destination; searchText = ""; filters = LibraryQuery(); selected = []; previewURL = nil; cleanupReview = false; cleanupSelection = []; sourceFilter = "" }
     func search(_ phrase: String) {
         let phrase = String(phrase.prefix(500))
         searchText = phrase; filters = LibraryQuery.parse(phrase); if filters.folder == "downloads" { filters.folder = settings.downloadsPath }; route = .search; previewURL = nil; selected = []
         searchOCR()
     }
     func searchOCR() {
-        searchTask?.cancel(); let token = UUID(); ocrToken = token; ocrMatches = []
+        searchTask?.cancel(); let token = UUID(); ocrToken = token; ocrMatches = []; searchingText = false
         let text = filters.text
         guard !text.isEmpty, let store = workspace.localIndex.store else { return }
         let roots = settings.roots
+        searchingText = true
         searchTask = Task {
+            defer { if ocrToken == token { searchingText = false } }
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             var paths = Set<String>()
             for root in roots {
@@ -273,6 +283,7 @@ final class LibraryModel: ObservableObject {
     func findFiles(_ phrase: String) async -> [LibraryFile] {
         search(phrase); searchTask?.cancel()
         let token = ocrToken
+        defer { if ocrToken == token { searchingText = false } }
         if !filters.text.isEmpty, let store = workspace.localIndex.store {
             var paths = Set<String>()
             for root in settings.roots { if let result = try? await store.search(SearchRequest(scope: root, content: filters.text)) { paths.formUnion(result.documents.map(\.path)) } }
@@ -381,7 +392,7 @@ final class LibraryModel: ObservableObject {
         if action == .trash {
             for item in summary.completed {
                 guard let destination = item.destination, let identity = try? FileIdentity(destination), !trashHistory.contains(where: { $0.trashPath == destination.path }) else { continue }
-                trashHistory.append(TrashHistoryItem(originalPath: item.source.path, trashPath: destination.path, signature: LibraryFile.signature(identity)))
+                trashHistory.append(TrashHistoryItem(originalPath: item.source.path, trashPath: destination.path, signature: LibraryFile.restorationSignature(identity)))
             }
         } else if action == .move { let moved = Set(summary.completed.map { $0.source.path }); trashHistory.removeAll { moved.contains($0.trashPath) } }
         trashHistory = Array(trashHistory.suffix(500))
@@ -390,7 +401,9 @@ final class LibraryModel: ObservableObject {
     func restore(_ item: TrashHistoryItem) {
         do {
             let url = URL(fileURLWithPath: item.trashPath)
-            guard LibraryFile.signature(try FileIdentity(url)) == item.signature else { throw FileFailure.changed(url) }
+            let identity = try FileIdentity(url), recorded = item.signature.split(separator: ":")
+            guard (recorded.count == 5 || recorded.count == 7), !identity.isSymbolicLink, !FileAvailability.isOnlineOnly(url),
+                  LibraryFile.restorationSignature(identity) == recorded.prefix(5).joined(separator: ":") else { throw FileFailure.changed(url) }
             let original = URL(fileURLWithPath: item.originalPath)
             browser.run(OperationRequest(.move, sources: [url], destination: original.deletingLastPathComponent(), name: original.lastPathComponent))
         } catch { status = error.localizedDescription }

@@ -107,6 +107,28 @@ private func libraryFile(_ name: String = "invoice.pdf", kind: LibraryKind = .do
     #expect(!FileManager.default.fileExists(atPath: source.path))
 }
 
+@Test func libraryRestorationAllowsTrashMetadataUpdatesButRejectsChangedContent() throws {
+    let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("MacEx-trash-identity-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("restore.txt")
+    try Data("retained content".utf8).write(to: file)
+    let before = try FileIdentity(file)
+    let data = Data("trash metadata".utf8)
+    #expect(data.withUnsafeBytes { setxattr(file.path, "local.macex.trash-fixture", $0.baseAddress, $0.count, 0, 0) } == 0)
+    let metadataUpdated = try FileIdentity(file)
+    #expect(LibraryFile.signature(before) != LibraryFile.signature(metadataUpdated))
+    #expect(LibraryFile.restorationSignature(before) == LibraryFile.restorationSignature(metadataUpdated))
+    let restored = root.appendingPathComponent("restored")
+    try FileManager.default.createDirectory(at: restored, withIntermediateDirectories: true)
+    let result = FileOperations().perform(OperationRequest(.move, sources: [file], destination: restored))
+    #expect(result.errors.isEmpty && result.completed.count == 1)
+    let target = restored.appendingPathComponent("restore.txt")
+    #expect(try String(contentsOf: target, encoding: .utf8) == "retained content")
+    try Data("changed content with another length".utf8).write(to: target)
+    #expect(LibraryFile.restorationSignature(before) != LibraryFile.restorationSignature(try FileIdentity(target)))
+}
+
 @Test func libraryRuleFoldersCannotEscapeOrFollowLinks() throws {
     let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("MacEx-rule-path-\(UUID().uuidString)")
     let root = base.appendingPathComponent("selected"), outside = base.appendingPathComponent("outside")

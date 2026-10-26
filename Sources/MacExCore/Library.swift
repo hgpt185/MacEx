@@ -45,6 +45,11 @@ public struct LibraryFile: Identifiable, Codable, Equatable, Sendable {
     public static func signature(_ identity: FileIdentity) -> String {
         "\(identity.device):\(identity.inode):\(identity.size):\(identity.modifiedSeconds):\(identity.modifiedNanos):\(identity.changedSeconds):\(identity.changedNanos)"
     }
+    /// Trash metadata can change ctime after a successful move. Restoration keeps
+    /// the original inode, size and content modification time as its durable receipt.
+    public static func restorationSignature(_ identity: FileIdentity) -> String {
+        "\(identity.device):\(identity.inode):\(identity.size):\(identity.modifiedSeconds):\(identity.modifiedNanos)"
+    }
     public func revalidate() throws {
         guard let identity = try? FileIdentity(url), Self.signature(identity) == signature,
               !identity.isSymbolicLink, !FileAvailability.isOnlineOnly(url) else { throw FileFailure.changed(url) }
