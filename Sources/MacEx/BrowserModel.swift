@@ -140,8 +140,8 @@ final class BrowserModel: ObservableObject {
             do {
                 let result = try await DirectoryReader.load(url, control: control) { [weak self] batch in
                     Task { @MainActor [weak self] in
-                        guard let self, generation == token, isLoading else { return }
-                        allEntries = batch; applyFilter()
+                        guard let self, self.generation == token, self.isLoading else { return }
+                        self.allEntries = batch; self.applyFilter()
                     }
                 }
                 guard generation == token else { return }
