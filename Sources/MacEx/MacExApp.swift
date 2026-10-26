@@ -185,8 +185,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 let message = error.localizedDescription
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    if terminating { isTerminating = false; NSApp.reply(toApplicationShouldTerminate: false) }
-                    model.errorMessage = "Could not save the workspace at \(url.path): \(message)"
+                    if terminating { self.isTerminating = false; NSApp.reply(toApplicationShouldTerminate: false) }
+                    self.model.errorMessage = "Could not save the workspace at \(url.path): \(message)"
                 }
             }
         }
