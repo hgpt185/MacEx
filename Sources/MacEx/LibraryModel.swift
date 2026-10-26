@@ -97,6 +97,7 @@ final class LibraryModel: ObservableObject {
     private var timer: Timer?
     @Published private var ocrMatches = Set<String>()
     private var ocrToken = UUID()
+    private var parsedSearchText = ""
     private var transcriptToken = UUID()
     var onShow: (() -> Void)?
     var onSettingsChanged: (() -> Void)?
@@ -258,13 +259,15 @@ final class LibraryModel: ObservableObject {
     func scheduleRefresh() { refreshTask?.cancel(); refreshTask = Task { [weak self] in do { try await Task.sleep(for: .seconds(3)) } catch { return }; self?.refresh() } }
     func cancelScan() { scanControl?.cancel(); workspace.localIndex.stop() }
     private func dismissPriorPages() { browser.showConnections = false; browser.showIndex = false; browser.showCleanup = false; browser.showSearch = false }
-    func show(_ destination: LibraryRoute) { dismissPriorPages(); searchTask?.cancel(); ocrToken = UUID(); searchingText = false; route = destination; searchText = ""; filters = LibraryQuery(); selected = []; previewURL = nil; cleanupReview = false; cleanupSelection = []; sourceFilter = "" }
+    func show(_ destination: LibraryRoute) { dismissPriorPages(); searchTask?.cancel(); ocrToken = UUID(); searchingText = false; route = destination; parsedSearchText = ""; searchText = ""; filters = LibraryQuery(); selected = []; previewURL = nil; cleanupReview = false; cleanupSelection = []; sourceFilter = "" }
     func search(_ phrase: String) {
         let phrase = String(phrase.prefix(500))
+        parsedSearchText = phrase
         dismissPriorPages(); sourceFilter = ""
         searchText = phrase; filters = LibraryQuery.parse(phrase); if filters.folder == "downloads" { filters.folder = settings.downloadsPath }; route = .search; previewURL = nil; selected = []
         searchOCR()
     }
+    func searchTextChanged(_ phrase: String) { if phrase != parsedSearchText { search(phrase) } }
     func searchOCR() {
         searchTask?.cancel(); let token = UUID(); ocrToken = token; ocrMatches = []; searchingText = false
         let text = filters.text

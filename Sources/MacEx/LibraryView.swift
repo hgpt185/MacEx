@@ -63,7 +63,7 @@ struct SingleWindowView: View {
             InAppInteractionView(model: interaction)
         }.background(Color(nsColor: .textBackgroundColor)).tint(accent)
             .modifier(LibraryDragContainer(urls: model.selected.map { URL(fileURLWithPath: $0) }))
-            .onChange(of: model.searchText) { _, text in if !text.isEmpty || model.route == .search { model.search(text) } }
+            .onChange(of: model.searchText) { _, text in if !text.isEmpty || model.route == .search { model.searchTextChanged(text) } }
             .onChange(of: browser.viewMode) { _, value in model.settings.grid = value == .icons; model.save() }
             .onChange(of: model.selected) { _, _ in
                 if model.previewURL != nil, model.selected.count == 1, let path = model.selected.first, model.previewURL?.path != path { model.preview(URL(fileURLWithPath: path)) }
@@ -147,7 +147,7 @@ struct SingleWindowView: View {
             }
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search, or try “pdfs from last week”…", text: $model.searchText).textFieldStyle(.plain).focused($searchFocused).onSubmit { model.search(model.searchText) }.accessibilityIdentifier("library-search")
+                TextField("Search, or try “pdfs from last week”…", text: $model.searchText).textFieldStyle(.plain).focused($searchFocused).onSubmit { model.searchTextChanged(model.searchText) }.accessibilityIdentifier("library-search")
                 if !model.searchText.isEmpty { Button { model.searchText = ""; model.filters = LibraryQuery(); model.show(.home) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain) }
                 Text("⌘F").font(.caption).foregroundStyle(.tertiary)
             }.padding(10).frame(maxWidth: 490).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 9))

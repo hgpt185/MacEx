@@ -22,6 +22,23 @@ import MacExCore
     #expect(library.sourceFilter.isEmpty && !browser.showConnections)
 }
 
+@MainActor @Test func librarySavedSearchRetainsEditsAcrossSearchFieldNotification() async throws {
+    let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("MacEx-saved-search-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let browser = BrowserModel(initialLocation: root, workspace: AppWorkspace())
+    let library = LibraryModel(browser: browser, directory: root)
+    defer { library.shutdown(); browser.setVisible(false) }
+    for _ in 0..<500 { if library.loaded { break }; try await Task.sleep(for: .milliseconds(10)) }
+    var edited = LibraryQuery.parse("documents"); edited.extensionName = "pdf"; edited.minimumBytes = 5_000_000
+    library.openSaved(LibrarySavedSearch(title: "Big PDFs", phrase: "documents", filters: edited))
+    library.searchTextChanged(library.searchText)
+    #expect(library.filters.extensionName == "pdf" && library.filters.minimumBytes == 5_000_000)
+    library.searchText = "videos from gmail"
+    library.searchTextChanged(library.searchText)
+    #expect(library.filters.kind == .videos && library.filters.source == "mail.google.com" && library.filters.minimumBytes == nil)
+}
+
 @MainActor @Test func libraryRestoreMovesMetadataUpdatedReceiptBackToOriginalName() async throws {
     let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("MacEx-app-restore-\(UUID().uuidString)")
     let sourceFolder = root.appendingPathComponent("Original"), trashFolder = root.appendingPathComponent("TrashFixture")
