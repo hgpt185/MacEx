@@ -24,6 +24,12 @@ jobs:
           xcodebuild -project MacEx.xcodeproj -scheme MacEx -configuration Debug \
             -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/ui-tests \
             -resultBundlePath .build/single-window.xcresult test
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: MacEx-UI-results
+          path: .build/single-window.xcresult
+          retention-days: 7
       - name: Prepare universal GitHub preview without notarization
         run: zsh Scripts/package-release.sh --prepare
       - name: Verify bundle and download checksums
