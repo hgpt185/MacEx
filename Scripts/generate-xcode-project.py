@@ -51,7 +51,7 @@ test_sources = add("TestSources", "isa = PBXSourcesBuildPhase; buildActionMask =
 test_frameworks = add("TestFrameworks", "isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;")
 common = {"SDKROOT": "macosx", "MACOSX_DEPLOYMENT_TARGET": "14.0", "SWIFT_VERSION": "6.0", "SWIFT_STRICT_CONCURRENCY": "complete", "CLANG_ENABLE_MODULES": "YES", "CODE_SIGN_IDENTITY": "-", "CODE_SIGN_STYLE": "Manual", "ENABLE_APP_SANDBOX": "NO"}
 project_configs = configs("Project", common)
-app_configs = configs("App", {"PRODUCT_NAME": "MacEx", "PRODUCT_MODULE_NAME": "MacExUIHost", "PRODUCT_BUNDLE_IDENTIFIER": "local.macex.app.uihost", "INFOPLIST_FILE": "Resources/UIHost-Info.plist", "GENERATE_INFOPLIST_FILE": "NO", "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/../Frameworks", "SWIFT_EMIT_LOC_STRINGS": "YES"})
+app_configs = configs("App", {"PRODUCT_NAME": "MacEx", "PRODUCT_MODULE_NAME": "$(MACEX_APP_MODULE)", "MACEX_APP_MODULE": "MacExUIHost", "PRODUCT_BUNDLE_IDENTIFIER": "local.macex.app.uihost", "INFOPLIST_FILE": "Resources/UIHost-Info.plist", "GENERATE_INFOPLIST_FILE": "NO", "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/../Frameworks", "SWIFT_EMIT_LOC_STRINGS": "YES"})
 test_configs = configs("UITest", {"PRODUCT_NAME": "MacExUITests", "PRODUCT_BUNDLE_IDENTIFIER": "local.macex.UITests", "GENERATE_INFOPLIST_FILE": "YES", "TEST_TARGET_NAME": "MacExUIHost"})
 proxy = add("TestProxy", "isa = PBXContainerItemProxy; containerPortal = " + uid("Project") + "; proxyType = 1; remoteGlobalIDString = " + uid("AppTarget") + "; remoteInfo = MacExUIHost;")
 dependency = add("TestDependency", "isa = PBXTargetDependency; target = " + uid("AppTarget") + "; targetProxy = " + proxy + ";")
