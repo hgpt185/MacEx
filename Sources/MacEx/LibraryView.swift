@@ -334,8 +334,16 @@ struct SingleWindowView: View {
     }
     private var folderPage: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack { Text(model.route == .trash ? "Trash" : browser.location.lastPathComponent).font(.title2).bold(); Spacer(); Button("Go to Folder…", action: browser.goToFolder); Button("New Folder…", action: browser.newFolder); Button("Pin Folder", action: browser.pinCurrentFolder); viewControls }.padding(.horizontal, 22).padding(.top, 20)
-            Text(browser.location.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled).padding(.horizontal, 22)
+            VStack(alignment: .leading, spacing: 12) {
+                Text(browser.location.lastPathComponent).font(.title2).bold().lineLimit(1).truncationMode(.middle).accessibilityIdentifier("folder-title")
+                HStack(spacing: 14) {
+                    Button(action: browser.goToFolder) { Label("Go to Folder…", systemImage: "folder") }.help("Go to Folder…")
+                    Button(action: browser.newFolder) { Label("New Folder…", systemImage: "folder.badge.plus") }.help("New Folder…")
+                    Button(action: browser.pinCurrentFolder) { Label("Pin Folder", systemImage: "pin") }.help("Pin Folder")
+                    Spacer(minLength: 0); viewControls
+                }.labelStyle(.iconOnly)
+            }.padding(.horizontal, 22).padding(.top, 20)
+            Text(browser.location.path).font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle).textSelection(.enabled).padding(.horizontal, 22)
             if let error = browser.errorMessage { Text(error).foregroundStyle(.orange).font(.caption).padding(.horizontal, 22) }
             if browser.viewMode == .list { FileTable(model: browser) } else { FileIcons(model: browser) }
         }

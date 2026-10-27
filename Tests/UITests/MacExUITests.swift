@@ -44,7 +44,8 @@ final class MacExUITests: XCTestCase {
             let file = app.tables["file-list"].staticTexts["Welcome.txt"]
             XCTAssertTrue(file.waitForExistence(timeout: 5)); file.click()
             app.typeKey(.space, modifierFlags: [])
-            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Disposable inline preview fixture")).firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "Disposable inline preview fixture")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertLessThan(app.staticTexts["folder-title"].frame.height, 50)
             XCTAssertEqual(app.windows.count, 1)
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertEqual(app.windows.count, 1)
