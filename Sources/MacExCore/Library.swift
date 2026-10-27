@@ -55,48 +55,103 @@ public struct LibraryFile: Identifiable, Codable, Equatable, Sendable {
               !identity.isSymbolicLink, !FileAvailability.isOnlineOnly(url) else { throw FileFailure.changed(url) }
     }
 }
+public enum LibraryDiscovery {
+    /// Ordinary personal folders and installed applications only; never all of Home.
+    public static func standardRoots(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [URL] {
+        [URL(fileURLWithPath: "/Applications", isDirectory: true), home.appendingPathComponent("Applications", isDirectory: true), URL(fileURLWithPath: "/System/Applications", isDirectory: true)]
+            + ["Desktop", "Documents", "Downloads", "Pictures", "Music", "Movies"].map { home.appendingPathComponent($0, isDirectory: true) }
+    }
+}
+public struct LibraryCoverageIssue: Codable, Equatable, Sendable {
+    public var path: String
+    public var message: String
+    public init(path: String, message: String) { self.path = path; self.message = message }
+}
 public struct LibrarySnapshot: Codable, Sendable {
     public var items: [LibraryFile]
     public var roots: [String]
     public var scanned: Date
     public var complete: Bool
     public var skipped: Int
+    public var issues: [LibraryCoverageIssue]? = nil
+    public var limitReached: Bool? = nil
     public init(items: [LibraryFile] = [], roots: [String] = [], scanned: Date = Date(), complete: Bool = false, skipped: Int = 0) {
         self.items = items; self.roots = roots; self.scanned = scanned; self.complete = complete; self.skipped = skipped
     }
 }
 public enum LibraryScanner {
+    public static let maxRoots = 24
+    public static let maxEntries = 100_000
+    public static let maxItems = 20_000
     public static func scan(roots: [URL], control: JobControl = JobControl(), progress: (@Sendable (Int) -> Void)? = nil) -> LibrarySnapshot {
         var items: [LibraryFile] = []; var seen = Set<String>(); var examined = 0; var skipped = 0; var complete = true
-        for root in roots.prefix(8) {
-            guard (try? FileIdentity(root))?.isDirectory == true, root.path != "/", root.resolvingSymlinksInPath().standardizedFileURL == root.standardizedFileURL else { skipped += 1; complete = false; continue }
-            guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isPackageKey, .creationDateKey, .addedToDirectoryDateKey, .tagNamesKey], options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in complete = false; skipped += 1; return true }) else { complete = false; continue }
-            for case let url as URL in enumerator {
-                if control.isCancelled || examined >= 100_000 || items.count >= 20_000 { complete = false; break }
-                examined += 1
-                if enumerator.level > 32 || ["node_modules", "Library", ".git", ".build", ".Trash", "Vendor"].contains(url.lastPathComponent) { enumerator.skipDescendants(); skipped += 1; continue }
-                guard seen.insert(SearchScope.canonicalPath(url.path)).inserted, let identity = try? FileIdentity(url), !identity.isSymbolicLink,
-                      SearchScope.canonicalPath(url.resolvingSymlinksInPath().path) == SearchScope.canonicalPath(url.path) else { enumerator.skipDescendants(); skipped += 1; continue }
-                let values = try? url.resourceValues(forKeys: [.isPackageKey, .creationDateKey, .addedToDirectoryDateKey, .tagNamesKey])
-                let package = values?.isPackage == true
-                if identity.isDirectory && !package { continue }
-                guard identity.isRegular || package else { skipped += 1; continue }
-                let md = MDItemCreate(nil, url.path as CFString)
-                func attribute(_ key: String) -> Any? { md.flatMap { MDItemCopyAttribute($0, key as CFString) } }
-                let from = attribute("kMDItemWhereFroms") as? [String] ?? []
-                let source = DownloadProvenance.source(url) ?? DownloadProvenance.normalizedSource(from)
-                let width = attribute("kMDItemPixelWidth") as? NSNumber, height = attribute("kMDItemPixelHeight") as? NSNumber
-                let imageMetadata = LibraryKind.classify(url, package: package) == .images ? LocalFileBytes.imageMetadata(url) : (nil, nil, nil)
-                items.append(LibraryFile(path: SearchScope.canonicalPath(url.path), name: url.lastPathComponent, kind: LibraryKind.classify(url, package: package), bytes: identity.isRegular ? identity.size : 0,
-                    modified: identity.modified, created: values?.creationDate, added: values?.addedToDirectoryDate, captured: imageMetadata.2 ?? attribute("kMDItemContentCreationDate") as? Date, lastUsed: attribute("kMDItemLastUsedDate") as? Date,
-                    source: source, tags: values?.tagNames ?? [], camera: attribute("kMDItemAcquisitionModel") as? String ?? imageMetadata.1,
-                    dimensions: width.flatMap { w in height.map { "\(w.intValue) × \($0.intValue)" } } ?? imageMetadata.0, duration: (attribute("kMDItemDurationSeconds") as? NSNumber)?.doubleValue,
-                    package: package, onlineOnly: FileAvailability.isOnlineOnly(url), screenshot: (attribute("kMDItemIsScreenCapture") as? NSNumber)?.boolValue == true || DownloadProvenance.isScreenshot(url), signature: LibraryFile.signature(identity)))
-                if examined.isMultiple(of: 100) { progress?(items.count) }
-            }
-            if !complete { break }
+        var issues: [LibraryCoverageIssue] = []; var limitReached = false
+        func issue(_ url: URL, _ message: String) {
+            complete = false; skipped += 1
+            if issues.count < 40 { issues.append(LibraryCoverageIssue(path: url.path, message: message)) }
         }
-        return LibrarySnapshot(items: items, roots: roots.map { SearchScope.canonicalPath($0.path) }, complete: complete, skipped: skipped)
+        func stopped() -> Bool {
+            if control.isCancelled { complete = false; return true }
+            if examined >= maxEntries || items.count >= maxItems { complete = false; limitReached = true; return true }
+            return false
+        }
+        func append(_ url: URL, identity: FileIdentity, package: Bool, values: URLResourceValues?) {
+            let md = MDItemCreate(nil, url.path as CFString)
+            func attribute(_ key: String) -> Any? { md.flatMap { MDItemCopyAttribute($0, key as CFString) } }
+            let from = attribute("kMDItemWhereFroms") as? [String] ?? []
+            let source = DownloadProvenance.source(url) ?? DownloadProvenance.normalizedSource(from)
+            let width = attribute("kMDItemPixelWidth") as? NSNumber, height = attribute("kMDItemPixelHeight") as? NSNumber
+            let kind = LibraryKind.classify(url, package: package)
+            let onlineOnly = FileAvailability.isOnlineOnly(url)
+            let imageMetadata = kind == .images && !onlineOnly ? LocalFileBytes.imageMetadata(url) : (nil, nil, nil)
+            items.append(LibraryFile(path: SearchScope.canonicalPath(url.path), name: url.lastPathComponent, kind: kind, bytes: identity.isRegular ? identity.size : 0,
+                modified: identity.modified, created: values?.creationDate, added: values?.addedToDirectoryDate, captured: imageMetadata.2 ?? attribute("kMDItemContentCreationDate") as? Date, lastUsed: attribute("kMDItemLastUsedDate") as? Date,
+                source: source, tags: values?.tagNames ?? [], camera: attribute("kMDItemAcquisitionModel") as? String ?? imageMetadata.1,
+                dimensions: width.flatMap { w in height.map { "\(w.intValue) × \($0.intValue)" } } ?? imageMetadata.0, duration: (attribute("kMDItemDurationSeconds") as? NSNumber)?.doubleValue,
+                package: package, onlineOnly: onlineOnly, screenshot: (attribute("kMDItemIsScreenCapture") as? NSNumber)?.boolValue == true || DownloadProvenance.isScreenshot(url), signature: LibraryFile.signature(identity)))
+            if items.count.isMultiple(of: 100) { progress?(items.count) }
+        }
+        let keys: Set<URLResourceKey> = [.isPackageKey, .creationDateKey, .addedToDirectoryDateKey, .tagNamesKey]
+        if roots.count > maxRoots { limitReached = true; issue(roots[maxRoots], "The library reached its 24-folder limit.") }
+        for root in roots.prefix(maxRoots) {
+            if stopped() { break }
+            guard root.isFileURL, let identity = try? FileIdentity(root), identity.isDirectory,
+                  root.path != "/", root.resolvingSymlinksInPath().standardizedFileURL == root.standardizedFileURL else {
+                issue(root, "Folder is missing, unavailable, or a symbolic link."); continue
+            }
+            let rootValues = try? root.resourceValues(forKeys: keys)
+            if root.pathExtension.lowercased() == "app" || rootValues?.isPackage == true {
+                if seen.insert(SearchScope.canonicalPath(root.path)).inserted { examined += 1; append(root, identity: identity, package: true, values: rootValues) }
+                continue
+            }
+            if FileAvailability.isOnlineOnly(root) { issue(root, "Online-only folder was not downloaded."); continue }
+            guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { url, error in
+                issue(url, error.localizedDescription); return true
+            }) else { issue(root, "Folder could not be read. Check folder access in Privacy & Security."); continue }
+            for case let url as URL in enumerator {
+                if stopped() { break }
+                examined += 1
+                if enumerator.level > 32 { enumerator.skipDescendants(); limitReached = true; issue(url, "The library reached its 32-level folder limit."); continue }
+                if ["node_modules", "Library", ".git", ".build", ".Trash", "Vendor"].contains(url.lastPathComponent) { enumerator.skipDescendants(); skipped += 1; continue }
+                guard seen.insert(SearchScope.canonicalPath(url.path)).inserted else { enumerator.skipDescendants(); continue }
+                guard let identity = try? FileIdentity(url), !identity.isSymbolicLink,
+                      SearchScope.canonicalPath(url.resolvingSymlinksInPath().path) == SearchScope.canonicalPath(url.path) else { enumerator.skipDescendants(); skipped += 1; continue }
+                let values = try? url.resourceValues(forKeys: keys)
+                let package = values?.isPackage == true || (identity.isDirectory && url.pathExtension.lowercased() == "app")
+                if package { enumerator.skipDescendants() }
+                if identity.isDirectory && !package {
+                    if FileAvailability.isOnlineOnly(url) { enumerator.skipDescendants(); issue(url, "Online-only folder was not downloaded.") }
+                    continue
+                }
+                guard identity.isRegular || package else { skipped += 1; continue }
+                append(url, identity: identity, package: package, values: values)
+            }
+            // Access errors make coverage partial; only cancellation or global budgets stop later roots.
+            if stopped() { break }
+        }
+        var result = LibrarySnapshot(items: items, roots: roots.map { SearchScope.canonicalPath($0.path) }, complete: complete, skipped: skipped)
+        result.issues = issues; result.limitReached = limitReached
+        return result
     }
 }
 

@@ -3,15 +3,27 @@ import MacExCore
 
 struct LibrarySettingsView: View {
     @ObservedObject var model: LibraryModel
+    @ObservedObject private var appearance = AppearanceModel.shared
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 Text("Settings").font(.largeTitle).bold()
                 GroupBox("Library folders") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Only chosen folders enter your library. Adding a folder starts a metadata refresh; recognition is a separate choice. Hidden files, links, developer caches and online-only contents are skipped.").font(.callout).foregroundStyle(.secondary)
-                        ForEach(model.settings.roots, id: \.self) { root in HStack { Text(root).font(.caption).textSelection(.enabled); Spacer(); Button("Remove") { model.removeRoot(root) }.disabled(model.scanning) } }
+                        Text("MacEx finds files in your Desktop, Documents, Downloads, Pictures, Music and Movies folders, plus installed applications. Remove locations you do not want included, or add another folder. Recognition is a separate choice.").font(.callout).foregroundStyle(.secondary)
+                        ForEach(model.discoveryRoots, id: \.self) { root in HStack { Text(root).font(.caption).textSelection(.enabled); Spacer(); Button("Remove") { model.removeRoot(root) }.disabled(model.scanning) } }
                         Button("Add Folder…", action: model.addFolder).disabled(model.scanning)
+                        Button("Refresh Library", action: model.refresh).disabled(model.scanning)
+                        if !(model.snapshot.issues ?? []).isEmpty || model.snapshot.limitReached == true {
+                            DisclosureGroup("Locations needing attention") {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    ForEach(Array((model.snapshot.issues ?? []).enumerated()), id: \.offset) { _, issue in
+                                        VStack(alignment: .leading, spacing: 3) { Text(issue.path).textSelection(.enabled); Text(issue.message).foregroundStyle(.secondary) }.font(.caption)
+                                    }
+                                    if model.snapshot.limitReached == true { Text("Discovery reached a library limit. Remove broad custom locations or choose narrower folders, then refresh.").font(.caption).foregroundStyle(.secondary) }
+                                }.padding(.top, 8)
+                            }
+                        }
                         HStack { Text("Downloads location").font(.caption); Text(model.settings.downloadsPath).font(.caption).foregroundStyle(.secondary).lineLimit(1); Spacer(); Button("Choose…") { model.workspace.interaction.choose("Choose your Downloads folder", folder: true, starting: model.browser.location) { url in if let url { model.settings.downloadsPath = url.path; model.save() } } } }
                     }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -19,7 +31,11 @@ struct LibrarySettingsView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Toggle("Playful colors", isOn: $model.settings.playful)
                         Slider(value: $model.settings.cardSize, in: 120...300, step: 10) { Text("Card size") }
-                        HStack { Text("Appearance"); Spacer(); Button("System") { appearance(nil) }; Button("Light") { appearance(.aqua) }; Button("Dark") { appearance(.darkAqua) } }
+                        Picker("Appearance", selection: Binding(get: { appearance.selection }, set: { appearance.select($0) })) {
+                            ForEach(AppAppearance.allCases) { value in Text(value.title).tag(value) }
+                        }.pickerStyle(.segmented)
+                            .accessibilityIdentifier("appearance-settings-picker")
+                        Text("System follows macOS. Light and Dark override it for MacEx. Playful colors are a separate style choice.").font(.caption).foregroundStyle(.secondary)
                         Text("Double-click and Space preview files here. Audio plays in the toolbar; arrows move between previews. Finder and external applications are never launched by these actions.").font(.caption).foregroundStyle(.secondary)
                     }.padding(12)
                 }
@@ -43,10 +59,23 @@ struct LibrarySettingsView: View {
                 }
                 GroupBox("Optional automatic rules") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Toggle("Move old .dmg/.pkg installers to Trash", isOn: rule(\.autoInstallers, title: "Enable installer cleanup?", message: "Old installer files from your chosen library folders will move to Trash after the configured age. Installation status is not proof of safety. Nothing is permanently deleted."))
-                        Toggle("File screenshots into folders by month", isOn: rule(\.autoScreenshots, title: "Enable monthly screenshot filing?", message: "Screenshots with system metadata move into Screenshots by Month/YYYY-MM under your first library root. Existing items are not overwritten."))
-                        Stepper("Rule age: \(model.settings.ruleDays) days", value: $model.settings.ruleDays, in: 1...365000)
-                        Text("Rules default off. Enabled rules run after refresh and every 30 minutes while MacEx is open. They recheck local identities and never hydrate online-only files. Review the rule scope before enabling.").font(.caption).foregroundStyle(.secondary)
+                        Text("Rules use only custom folders added with Add Folder. Automatically discovered locations are included only if you also add them as custom folders.").font(.callout).foregroundStyle(.secondary)
+                        if model.settings.roots.isEmpty {
+                            Text("No custom folders. Use Add Custom Folder before enabling a rule. Previously enabled rules can still be turned off.").font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text("Custom folders for rules").font(.caption).bold()
+                            ForEach(model.settings.roots, id: \.self) { root in Text(root).font(.caption).textSelection(.enabled) }
+                            if let root = model.settings.roots.first {
+                                Text("Screenshot destination: \(root)/Screenshots by Month/YYYY-MM").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
+                        }
+                        Button("Add Custom Folder…", action: model.addRuleFolder).disabled(model.scanning)
+                        Toggle("Move old .dmg/.pkg installers to Trash", isOn: rule(\.autoInstallers, title: "Enable installer cleanup?", message: "Old .dmg/.pkg installers inside these custom folders will move to Trash after the configured installer age:\n\(model.settings.roots.joined(separator: "\n"))\nInstallation status is not proof of safety. Nothing is permanently deleted."))
+                            .disabled(model.settings.roots.isEmpty && !model.settings.autoInstallers)
+                        Toggle("File screenshots into folders by month", isOn: rule(\.autoScreenshots, title: "Enable monthly screenshot filing?", message: "Screenshots with system metadata inside these custom folders:\n\(model.settings.roots.joined(separator: "\n"))\nwill move into Screenshots by Month/YYYY-MM under the first custom folder: \(model.settings.roots.first ?? "none"). Existing items are not overwritten. Installer age does not limit screenshot filing."))
+                            .disabled(model.settings.roots.isEmpty && !model.settings.autoScreenshots)
+                        Stepper("Installer age: \(model.settings.ruleDays) days", value: $model.settings.ruleDays, in: 1...365000)
+                        Text("Rules default off. Enabled rules check indexed files every 30 minutes while MacEx is open; refreshing the library does not run them. They recheck local identities and never hydrate online-only files. Review the custom-folder scope before enabling.").font(.caption).foregroundStyle(.secondary)
                     }.padding(12)
                 }
                 UpdateSettingsView(model: model.updates, interaction: model.workspace.interaction)
@@ -65,13 +94,12 @@ struct LibrarySettingsView: View {
             .onChange(of: model.settings.shortcutKey) { _, _ in model.save() }
             .onChange(of: model.settings.shortcutModifiers) { _, _ in model.save() }
     }
-    private func rule(_ key: WritableKeyPath<LibrarySettings, Bool>, title: String, message: String) -> Binding<Bool> {
+    func rule(_ key: WritableKeyPath<LibrarySettings, Bool>, title: String, message: String) -> Binding<Bool> {
         Binding(get: { model.settings[keyPath: key] }, set: { enabled in
             if !enabled { model.settings[keyPath: key] = false; model.save() }
-            else { model.workspace.interaction.confirm(title, message: message, button: "Enable Rule") { approved in if approved { model.settings[keyPath: key] = true; model.save() } } }
+            else if !model.settings.roots.isEmpty { model.workspace.interaction.confirm(title, message: message, button: "Enable Rule") { approved in if approved && !model.settings.roots.isEmpty { model.settings[keyPath: key] = true; model.save() } } }
         })
     }
-    private func appearance(_ value: NSAppearance.Name?) { NSApp.appearance = value.map { NSAppearance(named: $0) } ?? nil; UserDefaults.standard.set(value == nil ? "system" : value == .aqua ? "light" : "dark", forKey: "appearance") }
 }
 private struct UpdateSettingsView: View {
     @ObservedObject var model: UpdateModel
@@ -114,7 +142,8 @@ struct SimilarPhotosView: View {
     @StateObject private var state = SimilarPhotoState()
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
-            HStack { Text("Similar Photos").font(.largeTitle).bold(); Spacer(); Button("Find Look-alikes") { state.scan(model.snapshot.items) }.disabled(state.running) }
+            HStack { Text("Similar Photos").font(.largeTitle).bold(); Spacer(); Button("Find Look-alikes") { state.scan(model.snapshot.items.sorted { $0.modified > $1.modified }) }.disabled(state.running || model.scanning) }
+            Text("Compares the most recent local images in your library. Refresh Library to pick up newly added files.").font(.caption).foregroundStyle(.secondary)
             Text(state.status).font(.callout).foregroundStyle(.secondary)
             HStack { Text("Similarity distance"); Slider(value: $state.distance, in: 0.01...0.5); Text(String(format: "%.2f", state.distance)).monospacedDigit() }
             if state.running { HStack { ProgressView().controlSize(.small); Button("Cancel", action: state.cancel) } }

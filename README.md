@@ -1,6 +1,6 @@
 # MacEx
 
-A native, open-source Mac file library. **0.8.0 rebuilds the workflow around one window**: Home, categories, recent shelves, download sources, visible search filters, previews, music, cleanup, connections and settings.
+A native, open-source Mac file library. **0.8.1 adds automatic discovery of your files and installed apps, aligned full-row sidebar buttons, and persistent System/Light/Dark appearance** to the single-window workflow: Home, categories, recent shelves, download sources, visible search filters, previews, music, cleanup, connections and settings.
 
 Files open inside MacEx. Space and double-click preview them in the existing window. Folder selection, rename, conflict handling, host-key review and transfer destinations use in-window controls. MacEx does not launch Finder, external file applications, separate Quick Look panels, browser windows, or additional file-manager windows for these actions. Dock reopening and global Quick Search reuse the same window. macOS-owned menus and permission prompts remain system UI.
 
@@ -8,11 +8,13 @@ The app code is [MIT licensed](LICENSE). GitHub previews are universal, ad-hoc s
 
 ## The workflow
 
-1. Open Home and **Add Folder…**. Browse with MacEx’s own picker and choose the folders you want in the library.
+1. Open Home. MacEx discovers accessible files in your standard personal folders and installed application directories. Use **Add Folder…** to include up to eight custom folders, or remove unwanted locations in Settings.
 2. Open Images, Videos, Music, Documents, Archives or Apps. Switch between thumbnail grid and list, adjust card size and sort, or use Recents, Large Files and Screenshots.
 3. Search from the top bar. Phrases become removable chips and editable type, extension, size, source and date filters. Save searches to the sidebar; relative dates are recalculated when reopened, and manual filter changes are retained.
 4. Preview with Space, double-click or `⌘O`. Inspect source, dimensions, duration, camera, dates and tags where metadata exists. Images/PDFs support **Copy Text**, batch OCR copying and selectable transcripts. Audio plays in the shared player; arrows move between previews.
 5. Open Duplicates or Clean Up, review candidates, and move explicit selections to Trash. Restore MacEx-managed Trash moves from the in-app history. Similar Photos has its own review flow and never claims visual similarity proves identical content.
+
+Sidebar symbols, titles and counts use consistent columns; the entire padded row, including blank space, activates its action. Settings offers **System**, **Light** and **Dark** appearance; the top bar switches Light/Dark. The choice persists across launches. System follows macOS; Playful colors remain a separate setting.
 
 The main flow was informed by [Homy’s public workflow](https://tryhomy.app/). MacEx uses its own code, branding and assets. Homy’s purchase/licensing system, Finder shortcuts and floating search panel are not part of this open-source, single-window design.
 
@@ -33,11 +35,13 @@ Downloaded From groups existing source metadata into hostnames. It reads bounded
 
 ## OCR, local files and resource bounds
 
-Adding folders refreshes their local metadata. Text recognition is a separate, visible choice on Home or in Settings. It uses Vision, PDFKit and a private SQLite FTS5 index. Choosing a root, loading saved settings and launching the app do not initiate a broad content scan. Relaunch loads the saved library; refresh explicitly reconciles it. Active sessions use folder events to refresh changes.
+Ordinary launches automatically reconcile bounded metadata from `/Applications`, `~/Applications`, `/System/Applications`, and your Desktop, Documents, Downloads, Pictures, Music and Movies folders, together with saved custom folders. Existing custom roots are preserved. Settings lets you remove default locations; those opt-outs persist, and choosing a location again through Add Folder re-enables it. Missing optional folders are skipped. Coverage warnings identify denied or unavailable locations and scan limits; macOS permissions still apply. Refresh Library and folder events reconcile later changes.
+
+Text recognition is a separate, visible choice on Home or in Settings. It uses Vision, PDFKit and a private SQLite FTS5 index. Launching or adding folders does not enable OCR. Application directories and bundles are excluded from recognition. Duplicates and Similar Photos take candidates from the same real library catalog shown by the categories.
 
 Online-only/dataless files are never hydrated for library thumbnails, OCR, hashing, similarity or cleanup. Such entries can remain visible as online-only metadata. Hidden files, links, packages’ descendants, developer caches and Library/Trash internals are excluded from library scans. App bundles appear as metadata without recursively scanning their contents. Unknown package sizes are not treated as empty-file candidates.
 
-Library passes cap at 20,000 entries stored and 100,000 examined, depth 32, eight chosen roots and 32 MiB per saved metadata snapshot. OCR retains its per-file checkpoints, 64 MiB source cap, 50-megapixel image cap, first-frame/2,048-pixel processing, ten PDF pages, 65,536-character text cap and approximately 512 MiB database cap. Recognition respects battery, Low Power Mode and thermal policy; pause/resume and clear-data controls remain in Settings. Explicit batch Copy Text caps at 20 files and one million output characters.
+Library passes cap at 20,000 entries stored and 100,000 examined, depth 32 and 32 MiB per saved metadata snapshot. Up to eight custom roots supplement the standard locations. OCR uses at most eight non-application roots and retains its per-file checkpoints, 64 MiB source cap, 50-megapixel image cap, first-frame/2,048-pixel processing, ten PDF pages, 65,536-character text cap and approximately 512 MiB database cap. Recognition respects battery, Low Power Mode and thermal policy; pause/resume and clear-data controls remain in Settings. Explicit batch Copy Text caps at 20 files and one million output characters.
 
 Thumbnail work uses two active requests, a 128-request queue and a 64 MiB/512-image memory cache. Framework-managed allocations and the duration of an individual recognition/media request have no universal hard bound. Broad performance, energy and accessibility certification is not claimed.
 
@@ -47,7 +51,7 @@ Duplicates use size/sample checks, SHA-256 and final byte comparison. Hard-link 
 
 Clean Up offers forgotten downloads, old installers, old screenshots, big old videos, unused apps with available last-used metadata, and empty regular files. Age, size and installer extension are review signals, not proof of safety or proof that software was installed. Bundle sizes and missing usage metadata are disclosed. Logical bytes and estimated allocated/recoverable space can differ because of APFS clones, snapshots, compression, hard links and open files. Trash retains data until emptied.
 
-Optional rules default off and require a separate in-app opt-in. They can move old `.dmg`/`.pkg` files to Trash and organize screenshots into monthly folders under the first library root. They run after refresh and every 30 minutes while the app is open. Rule destinations reject link components and paths outside that root. No automatic permanent deletion occurs.
+Optional rules default off and require a separate in-app opt-in. They use only explicitly added custom folders; default discovery does not expand their scope. Use **Add Custom Folder…** in the rules section to include a standard location explicitly. Rules can move old `.dmg`/`.pkg` files to Trash and organize screenshots into monthly folders under the first custom root. They check every 30 minutes while the app is open and never run from library refresh. Rule destinations reject link components and paths outside that root. No automatic permanent deletion occurs.
 
 The local Trash history stores original paths and resulting Trash paths for up to 500 MacEx-managed moves. Restore checks identities, retains original names and uses the normal non-overwriting move/conflict engine. Files already changed, emptied or restored elsewhere report an error. History does not claim to reconstruct the original location of every file trashed by another app. Browsing Trash itself is also an in-window action, subject to macOS permissions.
 
@@ -91,8 +95,8 @@ zsh Scripts/package-release.sh --prepare
 xcodebuild -project MacEx.xcodeproj -scheme MacEx -destination 'platform=macOS' test
 ```
 
-Tests use isolated temporary fixtures. The optional cross-volume test requires an explicitly supplied disposable mounted volume through `MACEX_TEST_VOLUME`; it skips when absent. Native QA uses a separate app identifier and state directory, leaving the normal MacEx session alone. Launch flags `--folder` and `--state-directory` support that isolation.
+Tests use isolated temporary fixtures. The optional cross-volume test requires an explicitly supplied disposable mounted volume through `MACEX_TEST_VOLUME`; it skips when absent. Launch flags `--folder` and `--state-directory` support isolated QA profiles. Explicit `--state-directory` launches do not automatically discover real personal or application roots and display **Isolated library**. The 0.8.1 native pass also checked ordinary discovery of existing files with user authorization; no personal item was moved or trashed, and no automation was enabled.
 
 Library metadata/settings, OCR data, Trash history, saved connections and window state live under `~/Library/Application Support/MacEx/` with private app-owned files. SSH secrets use Keychain only after explicit selection. MacEx runs under the normal macOS account and does not bypass file permissions, privacy controls or SIP. System permission changes must be made manually by the user; the app does not launch System Settings.
 
-See [the 0.8.0 workflow verification](docs/P8-VERIFICATION.md) for current evidence. Earlier P1–P7 reports describe their respective engine versions and historical UI, including workflows intentionally superseded by the single-window redesign.
+See [the 0.8.1 verification](docs/verification/0.8.1.md) for current evidence and pending release checks. [The 0.8.0 workflow verification](docs/P8-VERIFICATION.md) and earlier P1–P7 reports describe their respective versions, including historical UI superseded by the single-window redesign.

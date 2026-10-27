@@ -165,18 +165,18 @@ public enum CleanupScanner {
     public static let maxDepth = 64
     /// Prevent a single scan from reading indefinitely. It must finish before review is enabled.
     public static let maxReadBytes: Int64 = 1_099_511_627_776
-    public static func run(_ options: CleanupOptions, control: JobControl = JobControl(),
+    public static func run(_ options: CleanupOptions, catalog: [LibraryFile]? = nil, control: JobControl = JobControl(),
                            onProgress: (@Sendable (String) -> Void)? = nil) -> CleanupScan {
-        scan(options, control: control, onProgress: onProgress)
+        scan(options, catalog: catalog, control: control, onProgress: onProgress)
     }
 
     // Fingerprint injection is internal so fixtures can prove final comparison rejects hash collisions.
-    static func scan(_ options: CleanupOptions, control: JobControl = JobControl(),
+    static func scan(_ options: CleanupOptions, catalog: [LibraryFile]? = nil, control: JobControl = JobControl(),
                      onProgress: (@Sendable (String) -> Void)? = nil,
                      fingerprint: ((CleanupFile) throws -> String)? = nil) -> CleanupScan {
         var result = CleanupScan(id: UUID(), options: options)
         func note(_ message: String) { result.skippedCount += 1; if result.skipped.count < 40 { result.skipped.append(message) } }
-        guard !options.roots.isEmpty, options.roots.count <= 16, options.largeFileBytes > 0,
+        guard !options.roots.isEmpty, options.roots.count <= (catalog == nil ? 16 : LibraryScanner.maxRoots), options.largeFileBytes > 0,
               options.oldDownloadDays > 0, options.oldDownloadDays <= 365_000 else {
             note("Choose 1–16 folders, a positive size, and an age from 1 to 365000 days."); result.reachedLimit = true; return result
         }
@@ -238,17 +238,42 @@ public enum CleanupScanner {
                 } else { note("Skipped special file: \(child.path)") }
             }
         }
-        for root in options.roots.map(\.standardizedFileURL).sorted(by: { $0.pathComponents.count < $1.pathComponents.count }) {
-            do {
-                try control.checkCancellation()
-                guard root.isFileURL, !["/", "/Users", "/Volumes", "/private", "/private/var"].contains(root.path), !CleanupPolicy.excluded(root) else {
-                    note("Excluded broad or protected root: \(root.path)"); continue
-                }
-                let fd = try CleanupAccess.directory(root); defer { close(fd) }
-                if (try? root.resourceValues(forKeys: [.isPackageKey]).isPackage) == true { note("Skipped package root: \(root.path)"); continue }
-                try walk(fd, root, root: root, depth: 0)
-            } catch FileFailure.cancelled { result.cancelled = true; break }
-            catch { note(error.localizedDescription) }
+        if let catalog {
+            // Library comparisons consume the reconciled catalog; new or hidden files are not added here.
+            if catalog.count > LibraryScanner.maxItems { result.reachedLimit = true; note("Library comparison reached its catalog limit.") }
+            for item in catalog.prefix(LibraryScanner.maxItems) {
+                if control.isCancelled { result.cancelled = true; break }
+                result.examined += 1
+                guard !item.package, !item.onlineOnly else { continue }
+                let url = item.url
+                guard !CleanupPolicy.excluded(url), let root = options.roots.first(where: {
+                    !["/", "/Users", "/Volumes", "/private", "/private/var"].contains($0.path)
+                        && !CleanupPolicy.excluded($0) && SearchScope.contains(itemPath: url.path, scopePath: $0.path)
+                }) else { note("Excluded catalog location: \(url.path)"); continue }
+                do {
+                    let parent = try CleanupAccess.directory(url.deletingLastPathComponent()); defer { close(parent) }
+                    var value = stat()
+                    guard fstatat(parent, url.lastPathComponent, &value, AT_SYMLINK_NOFOLLOW) == 0 else { throw FileFailure.posix(errno, url) }
+                    let identity = FileIdentity(value)
+                    guard identity.isRegular, LibraryFile.signature(identity) == item.signature, !FileAvailability.isOnlineOnly(url) else { throw FileFailure.changed(url) }
+                    if paths.insert(url.path).inserted {
+                        result.files.append(CleanupFile(url: url, root: root, identity: identity, linkCount: value.st_nlink, allocatedBytes: Int64(value.st_blocks) * 512))
+                    }
+                } catch { note(error.localizedDescription) }
+            }
+        } else {
+            for root in options.roots.map(\.standardizedFileURL).sorted(by: { $0.pathComponents.count < $1.pathComponents.count }) {
+                do {
+                    try control.checkCancellation()
+                    guard root.isFileURL, !["/", "/Users", "/Volumes", "/private", "/private/var"].contains(root.path), !CleanupPolicy.excluded(root) else {
+                        note("Excluded broad or protected root: \(root.path)"); continue
+                    }
+                    let fd = try CleanupAccess.directory(root); defer { close(fd) }
+                    if (try? root.resourceValues(forKeys: [.isPackageKey]).isPackage) == true { note("Skipped package root: \(root.path)"); continue }
+                    try walk(fd, root, root: root, depth: 0)
+                } catch FileFailure.cancelled { result.cancelled = true; break }
+                catch { note(error.localizedDescription) }
+            }
         }
         result.files.sort { $0.url.path < $1.url.path }
         let identities = Dictionary(grouping: result.files, by: \.key)

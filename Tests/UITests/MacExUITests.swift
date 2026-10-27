@@ -2,7 +2,7 @@ import XCTest
 
 /// Xcode-only workflow tests. All writes use newly created fixtures and isolated state.
 final class MacExUITests: XCTestCase {
-    @MainActor private func withFixture(_ check: @MainActor (XCUIApplication, URL) -> Void) throws {
+    @MainActor private func withFixture(_ check: @MainActor (XCUIApplication, URL) throws -> Void) throws {
         continueAfterFailure = false
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("MacEx-one-window-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Destination"), withIntermediateDirectories: true)
@@ -11,7 +11,7 @@ final class MacExUITests: XCTestCase {
         defer { app.terminate(); try? FileManager.default.removeItem(at: root) }
         app.launchArguments = ["--folder", root.path, "--state-directory", root.appendingPathComponent(".State").path, "-fileAccessChoiceSeen", "YES"]
         app.launch(); XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
-        check(app, root)
+        try check(app, root)
     }
     @MainActor func testHomeAndSearchReuseOneWindow() throws {
         try withFixture { app, _ in
@@ -49,6 +49,67 @@ final class MacExUITests: XCTestCase {
             XCTAssertEqual(app.windows.count, 1)
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertEqual(app.windows.count, 1)
+        }
+    }
+    @MainActor func testSidebarRowsAlignAndActivateAcrossBlankSpace() throws {
+        try withFixture { app, _ in
+            app.typeKey("n", modifierFlags: .command)
+            let home = app.buttons["library-sidebar-home"]
+            XCTAssertTrue(home.waitForExistence(timeout: 5))
+            for name in ["recents", "images", "videos", "music", "documents", "archives", "apps"] {
+                let row = app.buttons["library-sidebar-" + name]
+                XCTAssertEqual(row.frame.minX, home.frame.minX, accuracy: 1)
+                XCTAssertEqual(row.frame.width, home.frame.width, accuracy: 1)
+                XCTAssertEqual(row.frame.height, home.frame.height, accuracy: 1)
+            }
+            app.buttons["library-sidebar-recents"].coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).click()
+            XCTAssertTrue((app.staticTexts["library-page-title"].value as? String)?.hasPrefix("Recents") == true)
+            home.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)).click()
+            XCTAssertTrue(app.staticTexts["Library"].firstMatch.waitForExistence(timeout: 5))
+            app.buttons["library-sidebar-images"].coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).click()
+            XCTAssertTrue((app.staticTexts["library-page-title"].value as? String)?.hasPrefix("Images") == true)
+            XCTAssertEqual(app.windows.count, 1)
+        }
+    }
+    @MainActor func testAppearanceToggleSynchronizesSettingsAndSurvivesRelaunch() throws {
+        try withFixture { app, _ in
+            let toggle = app.buttons["appearance-toggle"]
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+            toggle.click()
+            let first = toggle.value as? String
+            XCTAssertTrue(first == "Dark" || first == "Light")
+            toggle.click()
+            let second = toggle.value as? String
+            XCTAssertNotEqual(first, second)
+            app.typeKey(",", modifierFlags: .command)
+            let choice = app.radioButtons[second ?? ""]
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            XCTAssertEqual(choice.value as? String, "1")
+            app.terminate(); app.launch()
+            XCTAssertTrue(app.buttons["appearance-toggle"].waitForExistence(timeout: 10))
+            XCTAssertEqual(app.buttons["appearance-toggle"].value as? String, second)
+            XCTAssertEqual(app.windows.count, 1)
+        }
+    }
+    @MainActor func testFirstLibraryDuplicateScanShowsResultsInSameWindow() throws {
+        try withFixture { app, root in
+            try FileManager.default.copyItem(at: root.appendingPathComponent("Welcome.txt"), to: root.appendingPathComponent("Welcome copy.txt"))
+            app.typeKey("n", modifierFlags: .command)
+            let add = app.buttons["library-sidebar-add-folder"]
+            XCTAssertTrue(add.waitForExistence(timeout: 5)); add.click()
+            let useFolder = app.buttons["Use This Folder"].firstMatch
+            XCTAssertTrue(useFolder.waitForExistence(timeout: 5))
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: useFolder)], timeout: 5), .completed)
+            useFolder.click()
+            app.buttons["library-sidebar-duplicates"].click()
+            let scan = app.buttons["Scan Library"]
+            XCTAssertTrue(scan.waitForExistence(timeout: 5))
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: scan)], timeout: 10), .completed)
+            scan.click()
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "2 identical files")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "0 selected")).firstMatch.exists)
+            XCTAssertEqual(app.windows.count, 1)
+            XCTAssertEqual(app.sheets.count, 0)
         }
     }
 }

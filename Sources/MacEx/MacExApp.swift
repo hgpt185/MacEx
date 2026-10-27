@@ -41,7 +41,7 @@ import MacExCore
         workspace.knownHosts = SSHKnownHosts(url: support.appendingPathComponent("ssh-known-hosts.json"))
         workspace.localIndex.configure(directory: support.appendingPathComponent("LocalIndex")); workspace.localIndex.interaction = workspace.interaction; workspace.localIndex.load()
         workspace.cleanup.interaction = workspace.interaction
-        if let appearance = UserDefaults.standard.string(forKey: "appearance"), appearance != "system" { NSApp.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua) }
+        _ = AppearanceModel.shared
         buildMenu()
         Task {
             var saved: WorkspaceSnapshot?
@@ -49,7 +49,8 @@ import MacExCore
             catch { canSave = false }
             if let saved { workspace.shortcuts = saved.shortcuts; workspace.savedSearches = saved.savedSearches; workspace.connections = saved.connections }
             let browser = BrowserModel(initialLocation: initialFolder, workspace: workspace, snapshot: saved?.windows.first?.browser)
-            let library = LibraryModel(browser: browser, directory: support)
+            let defaults = CommandLine.arguments.contains("--state-directory") ? [] : LibraryDiscovery.standardRoots()
+            let library = LibraryModel(browser: browser, directory: support, defaultRoots: defaults)
             self.library = library
             let controller = BrowserWindowController(model: browser, library: library); self.controller = controller
             if initialFolder != nil { library.route = .folder; browser.reload() }

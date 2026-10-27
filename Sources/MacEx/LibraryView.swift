@@ -28,6 +28,8 @@ struct SingleWindowView: View {
     @ObservedObject var model: LibraryModel
     @ObservedObject var browser: BrowserModel
     @ObservedObject var interaction: InAppInteraction
+    @ObservedObject private var appearance = AppearanceModel.shared
+    @Environment(\.colorScheme) private var colorScheme
     @FocusState private var searchFocused: Bool
     private let accent = Color(red: 0.25, green: 0.43, blue: 0.82)
     var body: some View {
@@ -62,6 +64,7 @@ struct SingleWindowView: View {
             if model.cleanupReview { reviewOverlay }
             InAppInteractionView(model: interaction)
         }.background(Color(nsColor: .textBackgroundColor)).tint(accent)
+            .preferredColorScheme(appearance.selection.colorScheme)
             .modifier(LibraryDragContainer(urls: model.selected.map { URL(fileURLWithPath: $0) }))
             .onChange(of: model.searchText) { _, text in if !text.isEmpty || model.route == .search { model.searchTextChanged(text) } }
             .onChange(of: browser.viewMode) { _, value in model.settings.grid = value == .icons; model.save() }
@@ -90,7 +93,14 @@ struct SingleWindowView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "square.stack.3d.up.fill").font(.system(size: 24)).foregroundStyle(accent)
-                Text("MacEx").font(.system(size: 20, weight: .semibold)); Spacer()
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("MacEx").font(.system(size: 20, weight: .semibold))
+                    if CommandLine.arguments.contains("--state-directory") || Bundle.main.bundleIdentifier == "local.macex.workflowqa" {
+                        Text("Isolated library").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("library-isolation-indicator")
+                    }
+                }
+                Spacer()
             }.padding(22)
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
@@ -105,38 +115,52 @@ struct SingleWindowView: View {
                     nav("Clean Up", "sparkles", .cleanup)
                     nav("Downloaded From", "arrow.down.circle", .sources)
                     if !model.workspace.savedSearches.filter(\.pinned).isEmpty {
-                        ForEach(model.workspace.savedSearches.filter(\.pinned)) { saved in Button { model.show(.folder); browser.runSavedSearch(saved) } label: { Label(saved.title, systemImage: "magnifyingglass") }.buttonStyle(.plain).font(.caption).padding(8) }
+                        ForEach(model.workspace.savedSearches.filter(\.pinned)) { saved in
+                            sidebarRow(saved.title, "magnifyingglass", identifier: "library-sidebar-pinned-\(saved.id.uuidString)") { model.show(.folder); browser.runSavedSearch(saved) }
+                        }
                     }
                     if !model.settings.saved.isEmpty {
                         Divider().padding(.vertical, 10)
                         Text("SAVED SEARCHES").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 10)
                         ForEach(model.settings.saved) { saved in
-                            Button { model.openSaved(saved) } label: { Label(saved.title, systemImage: "magnifyingglass").lineLimit(1) }.buttonStyle(.plain).padding(8)
+                            sidebarRow(saved.title, "magnifyingglass", identifier: "library-sidebar-saved-\(saved.id.uuidString)") { model.openSaved(saved) }
                                 .contextMenu { Button("Remove Search") { model.settings.saved.removeAll { $0.id == saved.id }; model.save() } }
                         }
                     }
                     Divider().padding(.vertical, 10)
                     Text("LOCATIONS").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 10)
                     ForEach(model.workspace.shortcuts) { shortcut in
-                        Button { model.show(.folder); browser.openShortcut(shortcut) } label: { Label(shortcut.title, systemImage: shortcut.symbol).frame(maxWidth: .infinity, alignment: .leading) }.buttonStyle(.plain).font(.system(size: 12)).padding(8)
+                        sidebarRow(shortcut.title, shortcut.symbol, identifier: "library-sidebar-location-\(shortcut.id.uuidString)") { model.show(.folder); browser.openShortcut(shortcut) }
                     }
-                    Button { model.addFolder() } label: { Label("Add Library Folder", systemImage: "plus.circle") }.buttonStyle(.plain).font(.system(size: 12)).padding(8)
+                    sidebarRow("Add Library Folder", "plus.circle", identifier: "library-sidebar-add-folder") { model.addFolder() }
                     Divider().padding(.vertical, 10)
                     nav("Connections", "network", .servers)
                     nav("Trash", "trash", .trash)
                     nav("Settings", "gearshape", .settings)
-                }.padding(.horizontal, 12)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12)
             }
         }.background(Color(nsColor: .windowBackgroundColor).opacity(0.7))
     }
     private func nav(_ title: String, _ symbol: String, _ route: LibraryRoute, count: Int? = nil) -> some View {
-        Button { model.show(route) } label: {
+        sidebarRow(title, symbol, count: count, selected: model.route == route, identifier: "library-sidebar-\(title.lowercased().replacingOccurrences(of: " ", with: "-"))") { model.show(route) }
+    }
+    private func sidebarRow(_ title: String, _ symbol: String, count: Int? = nil, selected: Bool = false, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: symbol).frame(width: 19).foregroundStyle(model.route == route ? accent : .secondary)
-                Text(title); Spacer(); if let count, count > 0 { Text(count.formatted()).font(.system(size: 10)).foregroundStyle(.tertiary) }
-            }.font(.system(size: 12, weight: model.route == route ? .semibold : .regular)).padding(.horizontal, 10).padding(.vertical, 9)
-                .background(model.route == route ? accent.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(.plain)
+                Image(systemName: symbol).frame(width: 20, height: 16).foregroundStyle(selected ? accent : .secondary)
+                Text(title).lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+                if let count {
+                    Text(count > 0 ? count.formatted() : "").font(.system(size: 10)).monospacedDigit().foregroundStyle(.tertiary)
+                        .lineLimit(1).minimumScaleFactor(0.7).frame(width: 36, alignment: .trailing)
+                }
+            }.font(.system(size: 12, weight: selected ? .semibold : .regular))
+                .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading).padding(.horizontal, 10).padding(.vertical, 9)
+                .background(selected ? accent.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityIdentifier(identifier).accessibilityLabel(title)
+            .accessibilityValue(count.map { "\($0.formatted()) files" } ?? "")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .help(title)
     }
     private var topbar: some View {
         HStack(spacing: 12) {
@@ -152,7 +176,9 @@ struct SingleWindowView: View {
                 Text("⌘F").font(.caption).foregroundStyle(.tertiary)
             }.padding(10).frame(maxWidth: 490).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 9))
             Spacer(minLength: 0)
-            Button { model.settings.playful.toggle(); model.save() } label: { Image(systemName: model.settings.playful ? "paintpalette" : "circle.lefthalf.filled") }.help("Switch Playful / Minimal look")
+            Button { appearance.select(colorScheme == .dark ? .light : .dark) } label: { Image(systemName: colorScheme == .dark ? "sun.max" : "moon") }
+                .help(colorScheme == .dark ? "Switch to Light appearance" : "Switch to Dark appearance")
+                .accessibilityIdentifier("appearance-toggle").accessibilityLabel("Toggle dark mode").accessibilityValue(appearance.selection.title)
             Button { model.inspector.toggle() } label: { Image(systemName: "sidebar.right") }.help("Inspector (⌘I)")
             Button { browser.showingOperations.toggle() } label: { Image(systemName: (model.workspace.jobs.busy || model.remote?.busy == true) ? "arrow.down.circle.fill" : "arrow.down.circle") }.help("File operations")
         }.buttonStyle(.plain).padding(.horizontal, 24).padding(.vertical, 14)
@@ -182,18 +208,24 @@ struct SingleWindowView: View {
                     }
                     Spacer(); Button(action: model.refresh) { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(model.scanning)
                 }
+                if model.scanning {
+                    HStack(spacing: 10) { ProgressView().controlSize(.small); Text("Finding files and applications on this Mac…").foregroundStyle(.secondary) }
+                }
+                if !(model.snapshot.issues ?? []).isEmpty || model.snapshot.limitReached == true {
+                    HStack { Label("Some locations need attention", systemImage: "exclamationmark.circle").foregroundStyle(.secondary); Spacer(); Button("Review Locations") { model.show(.settings) } }.font(.callout)
+                }
                 HStack { Text("Library").font(.title2).bold(); Text("6").font(.caption).padding(.horizontal, 8).padding(.vertical, 3).background(.quaternary, in: Capsule()) }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 205, maximum: 340), spacing: 18)], spacing: 18) {
                     ForEach(Array(LibraryKind.allCases.filter { $0 != .other }.enumerated()), id: \.element) { i, kind in categoryCard(kind, index: i) }
                 }
-                if model.settings.roots.isEmpty {
+                if model.discoveryRoots.isEmpty {
                     HStack(spacing: 15) {
                         Image(systemName: "folder.badge.plus").font(.largeTitle).foregroundStyle(accent)
                         VStack(alignment: .leading, spacing: 5) { Text("Your library starts with a folder").font(.headline); Text("Choose the folders you want to see here. Local files stay local; online-only contents are skipped.").font(.callout).foregroundStyle(.secondary) }
                         Spacer(); Button("Add Folder…", action: model.addFolder).buttonStyle(.borderedProminent)
                     }.padding(20).background(accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
                 }
-                if !model.settings.roots.isEmpty && !model.settings.recognizeText {
+                if !model.discoveryRoots.isEmpty && !model.settings.recognizeText {
                     HStack { VStack(alignment: .leading, spacing: 5) { Text("Search the words in your images").font(.headline); Text("Enable local text recognition for your chosen folders. You can pause or clear it in Settings.").font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Enable Text Search") { model.settings.recognizeText = true; model.save(); model.refresh() } }.padding(18).background(accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
                 }
                 HStack { Text("Clean Up").font(.title2).bold(); Spacer(); Button("See all") { model.show(.cleanup) }.buttonStyle(.plain).foregroundStyle(.secondary) }
@@ -230,11 +262,14 @@ struct SingleWindowView: View {
     }
     private var filesPage: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack { Text(model.route.title).font(.system(size: 26, weight: .semibold)); Text("\(model.items.count)").foregroundStyle(.secondary); Spacer(); if model.route == .search { Button("Save Search", action: model.saveSearch).disabled(model.searchText.isEmpty) }; viewControls }
+            HStack { Text(model.route.title).font(.system(size: 26, weight: .semibold)).accessibilityIdentifier("library-page-title"); Text("\(model.items.count)").foregroundStyle(.secondary); Spacer(); if model.route == .search { Button("Save Search", action: model.saveSearch).disabled(model.searchText.isEmpty) }; viewControls }
             if model.route == .search { chips; filterEditor }
             if !model.sources.isEmpty { HStack { Picker("From", selection: $model.sourceFilter) { Text("Any source").tag(""); ForEach(model.sources, id: \.0) { Text($0.0).tag($0.0) } }.frame(maxWidth: 250); Spacer(); if !model.selected.isEmpty { Button("Copy Text") { model.copyText() }; Button("Move to Trash…") { model.prepareTrash(model.snapshot.items.filter { model.selected.contains($0.path) }) } } } }
             if model.searchingText { HStack { ProgressView().controlSize(.small); Text("Searching recognized text…").font(.caption).foregroundStyle(.secondary) } }
-            if model.items.isEmpty && !model.searchingText { ContentUnavailableView(model.settings.roots.isEmpty ? "Add your folders" : "No matching files", systemImage: "magnifyingglass", description: Text("Filters use the available library metadata and recognized text. Missing camera, source or date metadata is excluded by those filters.")) }
+            if model.items.isEmpty && !model.searchingText {
+                if model.scanning { ContentUnavailableView("Finding files on this Mac", systemImage: "externaldrive.badge.magnifyingglass", description: Text("Your folders and applications are being added to the library. Categories update as discovery completes.")) }
+                else { ContentUnavailableView(model.discoveryRoots.isEmpty ? "Add your folders" : "No matching files", systemImage: "magnifyingglass", description: Text("Filters use the available library metadata and recognized text. Missing camera, source or date metadata is excluded by those filters.")) }
+            }
             else if browser.viewMode == .list {
                 Table(model.items, selection: $model.selected) {
                     TableColumn("Name") { item in HStack { LibraryThumbnail(url: item.url, symbol: item.kind.symbol).frame(width: 28, height: 28); Text(item.name) }.onTapGesture(count: 2) { model.preview(item.url) } }.width(min: 170)
@@ -372,9 +407,10 @@ struct SingleWindowView: View {
     }
     private var duplicatePage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack { Text("Duplicates").font(.largeTitle).bold(); Spacer(); Button("Scan Library") { let cleanup = model.workspace.cleanup; cleanup.roots = model.settings.roots.map { URL(fileURLWithPath: $0) }; cleanup.start() }.disabled(model.workspace.cleanup.running || model.settings.roots.isEmpty) }
+            HStack { Text("Duplicates").font(.largeTitle).bold(); Spacer(); Button("Scan Library", action: model.startDuplicateScan).disabled(model.scanning || model.workspace.cleanup.running || model.discoveryRoots.isEmpty) }
             Text("Identical content is verified byte for byte. Choose a copy to keep and review extras before Trash. Similar Photos is a separate visual-similarity view.").font(.callout).foregroundStyle(.secondary)
-            InlineDuplicates(browser: browser, cleanup: model.workspace.cleanup)
+            if model.workspace.cleanup.catalogBacked { InlineDuplicates(browser: browser, cleanup: model.workspace.cleanup) }
+            else { ContentUnavailableView("Compare your library", systemImage: "square.on.square", description: Text("Scan Library compares the files shown in your categories. Nothing is selected or removed automatically.")) }
         }.padding(24)
     }
     private var serverPage: some View {

@@ -10,6 +10,7 @@ final class CleanupModel: ObservableObject {
     @Published var sampleHashes = true
     @Published var category: CleanupCategory = .duplicates { didSet { if category != oldValue { selected = []; review = nil } } }
     @Published var scan: CleanupScan?
+    @Published private(set) var catalogBacked = false
     @Published var running = false
     @Published var status = "Choose folders, then start a scan. No folders are scanned automatically."
     @Published var selected: Set<URL> = [] { didSet { review = nil } }
@@ -30,21 +31,28 @@ final class CleanupModel: ObservableObject {
 
     func invalidate() {
         control?.cancel(); generation = UUID(); running = false
+        catalogBacked = false
         scan = nil; selected = []; retained = [:]; review = nil
         status = "Settings changed. Start a new scan to review candidates."
     }
-    func start() {
+    func invalidateCatalog() {
+        guard catalogBacked else { return }
+        invalidate()
+    }
+    func start() { start(catalog: nil) }
+    func start(catalog: [LibraryFile]?) {
         guard let mib = Int64(largeMiB), mib > 0, mib <= Int64.max / 1_048_576,
               let days = Int(oldDays), days > 0, days <= 365_000 else {
             status = "Enter a positive whole MiB size and an age from 1 to 365000 days."; return
         }
         invalidate()
+        catalogBacked = catalog != nil
         let options = CleanupOptions(roots: roots, largeFileBytes: mib * 1_048_576, oldDownloadDays: days, useSampleHashes: sampleHashes)
         let token = UUID(); generation = token
         let control = JobControl(); self.control = control
         running = true; status = "Scanning selected folders…"
         Self.worker.async { [self] in
-            let result = CleanupScanner.run(options, control: control) { text in
+            let result = CleanupScanner.run(options, catalog: catalog, control: control) { text in
                 Task { @MainActor [self] in
                     guard generation == token, running else { return }; status = text
                 }

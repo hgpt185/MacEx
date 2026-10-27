@@ -2,12 +2,14 @@ import AppKit
 import Combine
 import AVFoundation
 import MacExCore
+import Darwin
 
 struct TrashHistoryItem: Identifiable, Codable { var id: String { trashPath }; var originalPath: String; var trashPath: String; var signature: String }
 
 struct LibrarySavedSearch: Identifiable, Codable { var id = UUID(); var title: String; var phrase: String; var filters: LibraryQuery? = nil }
 struct LibrarySettings: Codable {
     var roots: [String] = []
+    var excludedDefaultRoots: [String] = []
     var downloadsPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads").path
     var grid = true
     var playful = true
@@ -21,10 +23,11 @@ struct LibrarySettings: Codable {
     var shortcutModifiers: UInt32 = 768 // Command + Shift, Carbon modifiers
     var saved: [LibrarySavedSearch] = []
     init() {}
-    enum CodingKeys: String, CodingKey { case roots, downloadsPath, grid, playful, cardSize, menuBar, recognizeText, autoInstallers, autoScreenshots, ruleDays, shortcutKey, shortcutModifiers, saved }
+    enum CodingKeys: String, CodingKey { case roots, excludedDefaultRoots, downloadsPath, grid, playful, cardSize, menuBar, recognizeText, autoInstallers, autoScreenshots, ruleDays, shortcutKey, shortcutModifiers, saved }
     init(from decoder: Decoder) throws {
         self.init(); let c = try decoder.container(keyedBy: CodingKeys.self)
         roots = try c.decodeIfPresent([String].self, forKey: .roots) ?? roots
+        excludedDefaultRoots = try c.decodeIfPresent([String].self, forKey: .excludedDefaultRoots) ?? []
         downloadsPath = try c.decodeIfPresent(String.self, forKey: .downloadsPath) ?? downloadsPath
         grid = try c.decodeIfPresent(Bool.self, forKey: .grid) ?? grid
         playful = try c.decodeIfPresent(Bool.self, forKey: .playful) ?? playful
@@ -51,6 +54,25 @@ final class LibraryModel: ObservableObject {
     let browser: BrowserModel
     let workspace: AppWorkspace
     let directory: URL
+    private let defaultRoots: [String]
+    var discoveryRoots: [String] {
+        var seen = Set<String>()
+        let enabled = defaultRoots.filter { path in
+            guard !settings.excludedDefaultRoots.contains(path) else { return false }
+            do { _ = try FileIdentity(URL(fileURLWithPath: path)); return true }
+            catch FileFailure.posix(let code, _) { return code != ENOENT && code != ENOTDIR }
+            catch { return true } // Keep denied folders visible as coverage issues.
+        }
+        return (enabled + settings.roots.map { SearchScope.canonicalPath($0) }).filter { seen.insert($0).inserted }
+    }
+    var recognitionRoots: [String] {
+        let applications = LibraryDiscovery.standardRoots().filter { $0.lastPathComponent == "Applications" }.map(\.path)
+            + defaultRoots.filter { URL(fileURLWithPath: $0).lastPathComponent == "Applications" }
+        return Array(discoveryRoots.filter { root in
+            root != FileManager.default.homeDirectoryForCurrentUser.path && URL(fileURLWithPath: root).pathExtension.lowercased() != "app"
+                && !applications.contains { root == SearchScope.canonicalPath($0) || SearchScope.contains(itemPath: root, scopePath: $0) }
+        }.prefix(8))
+    }
     @Published var sidebarVisible = true
     @Published var trashHistory: [TrashHistoryItem] = []
     @Published var reviewItems: [LibraryFile] = []
@@ -93,6 +115,7 @@ final class LibraryModel: ObservableObject {
     private var scanControl: JobControl?
     private var searchTask: Task<Void, Never>?
     private var watcher: IndexEvents?
+    private var watchedRoots: [String] = []
     private var refreshTask: Task<Void, Never>?
     private var timer: Timer?
     @Published private var ocrMatches = Set<String>()
@@ -149,7 +172,8 @@ final class LibraryModel: ObservableObject {
             }
         }
     }
-    init(browser: BrowserModel, directory: URL) {
+    init(browser: BrowserModel, directory: URL, defaultRoots: [URL] = []) {
+        self.defaultRoots = Array(defaultRoots.prefix(16)).map { SearchScope.canonicalPath($0.path) }
         self.browser = browser; self.workspace = browser.workspace; self.directory = directory
         browser.previewRequested = { [weak self] url in self?.preview(url) }
         browser.quickLook = { [weak self] in if let url = self?.browser.selected.first?.url { self?.preview(url) } }
@@ -157,6 +181,7 @@ final class LibraryModel: ObservableObject {
         browser.stateChanged = { [weak self] in self?.objectWillChange.send() }
         workspace.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         workspace.jobs.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
+        workspace.cleanup.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         workspace.localIndex.$running.dropFirst().removeDuplicates().sink { [weak self] running in
             guard !running else { return }
             Task { @MainActor [weak self] in
@@ -200,10 +225,15 @@ final class LibraryModel: ObservableObject {
                     }
                     return (try read("library-settings.json", type: LibrarySettings.self), try read("library.json", type: LibrarySnapshot.self), try read("trash-history.json", type: [TrashHistoryItem].self))
                 }.value
-                if let settings = data.0 { guard settings.roots.count <= 8, (120...300).contains(settings.cardSize), (1...365000).contains(settings.ruleDays) else { throw FileFailure.message("Invalid library settings.") }; self.settings = settings; browser.viewMode = settings.grid ? .icons : .list }
-                if let snapshot = data.1 { self.snapshot = snapshot; status = "Library saved \(snapshot.scanned.formatted(date: .abbreviated, time: .shortened)). Refresh to reconcile changes." }
+                if let settings = data.0 { guard settings.roots.count <= 8, settings.excludedDefaultRoots.count <= 24, (120...300).contains(settings.cardSize), (1...365000).contains(settings.ruleDays) else { throw FileFailure.message("Invalid library settings.") }; self.settings = settings; browser.viewMode = settings.grid ? .icons : .list }
+                if let snapshot = data.1 {
+                    self.snapshot = snapshot
+                    self.snapshot.items.removeAll { item in !discoveryRoots.contains { item.path == $0 || SearchScope.contains(itemPath: item.path, scopePath: $0) } }
+                    status = "Library saved \(snapshot.scanned.formatted(date: .abbreviated, time: .shortened)). Refresh to reconcile changes." }
                 trashHistory = Array((data.2 ?? []).suffix(500))
                 onSettingsChanged?(); startRuleTimer(); updates.configure(directory: directory)
+                save()
+                if !discoveryRoots.isEmpty { refresh() }
             } catch { canWrite = false; status = "Saved library preserved: \(error.localizedDescription)" }
         }
     }
@@ -216,21 +246,36 @@ final class LibraryModel: ObservableObject {
             onSettingsChanged?()
         } catch { status = error.localizedDescription }
     }
-    func addFolder() {
+    func addFolder() { chooseFolderForLibrary(asRuleFolder: false) }
+    func addRuleFolder() { chooseFolderForLibrary(asRuleFolder: true) }
+    private func chooseFolderForLibrary(asRuleFolder: Bool) {
         guard !scanning else { status = "Wait for the current refresh or press Stop before changing roots."; return }
         workspace.interaction.choose("Add a library folder", folder: true, starting: browser.location) { [weak self] url in
             guard let self, let url else { return }
             let path = SearchScope.canonicalPath(url.path)
-            guard self.settings.roots.count < 8, !self.settings.roots.contains(path), path != "/" else { self.status = "Choose a specific folder, up to eight roots."; return }
-            self.settings.roots.append(path); self.save(); self.refresh()
+            if self.defaultRoots.contains(path) {
+                self.settings.excludedDefaultRoots.removeAll { $0 == path }
+            }
+            if asRuleFolder || !self.defaultRoots.contains(path) {
+                guard self.settings.roots.count < 8, !self.settings.roots.contains(path), path != "/" else { self.status = "Choose a specific folder, up to eight custom roots."; return }
+                self.settings.roots.append(path)
+            }
+            self.save(); self.refresh()
         }
     }
     func removeRoot(_ root: String) {
-        guard !scanning else { return }; settings.roots.removeAll { $0 == root }
-        workspace.localIndex.stop(); workspace.localIndex.roots.removeAll { SearchScope.canonicalPath($0) == SearchScope.canonicalPath(root) }
-        snapshot.items.removeAll { SearchScope.contains(itemPath: $0.path, scopePath: root) }; save(); persistSnapshot()
+        guard !scanning else { return }
+        let root = SearchScope.canonicalPath(root)
+        settings.roots.removeAll { SearchScope.canonicalPath($0) == root }
+        if defaultRoots.contains(root), !settings.excludedDefaultRoots.contains(root) { settings.excludedDefaultRoots.append(root) }
+        workspace.localIndex.stop(); workspace.localIndex.roots.removeAll { SearchScope.canonicalPath($0) == root }
+        let roots = discoveryRoots
+        snapshot.items.removeAll { item in !roots.contains { item.path == $0 || SearchScope.contains(itemPath: item.path, scopePath: $0) } }
+        snapshot.roots = roots; snapshot.complete = false
+        workspace.cleanup.invalidateCatalog(); save(); persistSnapshot()
         if let store = workspace.localIndex.store { Task { try? await store.removeRoot(root) } }
-        watcher = nil
+        watcher = nil; watchedRoots = []
+        refresh()
     }
     private func persistSnapshot() {
         let snapshot = snapshot, url = directory.appendingPathComponent("library.json")
@@ -239,22 +284,33 @@ final class LibraryModel: ObservableObject {
         }
     }
     func refresh() {
-        guard !scanning, !settings.roots.isEmpty else { return }
+        guard !scanning else { return }
+        let paths = discoveryRoots
+        guard !paths.isEmpty else {
+            snapshot = LibrarySnapshot(roots: [], complete: true)
+            watcher = nil; watchedRoots = []; workspace.cleanup.invalidateCatalog(); persistSnapshot()
+            status = "Add a folder to build your library."; return
+        }
         let control = JobControl(); scanControl = control; scanning = true; status = "Updating your library…"
-        let roots = settings.roots.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let roots = paths.map { URL(fileURLWithPath: $0, isDirectory: true) }
         Task {
             let receiver = self
             let result = await Task.detached(priority: .utility) { LibraryScanner.scan(roots: roots, control: control) { count in Task { @MainActor [weak receiver] in if receiver?.scanning == true { receiver?.status = "Found \(count.formatted()) files…" } } } }.value
-            if !control.isCancelled { snapshot = result; persistSnapshot(); onSettingsChanged?() }
+            if !control.isCancelled { snapshot = result; workspace.cleanup.invalidateCatalog(); persistSnapshot(); onSettingsChanged?() }
             scanning = false; scanControl = nil
-            status = "\(result.items.count.formatted()) files · \(result.skipped) excluded\(result.complete ? "" : " · partial coverage; narrow roots or refresh") · online-only contents stay undownloaded"
-            if watcher == nil { watcher = try? IndexEvents(roots: settings.roots) { [weak self] in Task { @MainActor [weak self] in self?.scheduleRefresh() } } }
-            if settings.recognizeText, !workspace.localIndex.running {
-                workspace.localIndex.load(); workspace.localIndex.roots = settings.roots.filter { $0 != FileManager.default.homeDirectoryForCurrentUser.path }; workspace.localIndex.start()
+            status = control.isCancelled ? "Refresh stopped. Previous library retained." : "\(result.items.count.formatted()) files · \(result.skipped) excluded\(result.complete ? "" : " · partial coverage; check folder access or limits") · online-only contents stay undownloaded"
+            if watchedRoots != paths { watcher = nil; watchedRoots = paths }
+            if watcher == nil { watcher = try? IndexEvents(roots: paths) { [weak self] in Task { @MainActor [weak self] in self?.scheduleRefresh() } } }
+            if !control.isCancelled, settings.recognizeText, !workspace.localIndex.running {
+                workspace.localIndex.roots = recognitionRoots; workspace.localIndex.start()
             }
             if !searchText.isEmpty { search(searchText) }
-            runRules()
         }
+    }
+    func startDuplicateScan() {
+        guard !scanning else { status = "Wait for library refresh before comparing duplicates."; return }
+        workspace.cleanup.roots = discoveryRoots.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        workspace.cleanup.start(catalog: snapshot.items)
     }
     func scheduleRefresh() { refreshTask?.cancel(); refreshTask = Task { [weak self] in do { try await Task.sleep(for: .seconds(3)) } catch { return }; self?.refresh() } }
     func cancelScan() { scanControl?.cancel(); workspace.localIndex.stop() }
@@ -272,7 +328,7 @@ final class LibraryModel: ObservableObject {
         searchTask?.cancel(); let token = UUID(); ocrToken = token; ocrMatches = []; searchingText = false
         let text = filters.text
         guard !text.isEmpty, let store = workspace.localIndex.store else { return }
-        let roots = settings.roots
+        let roots = recognitionRoots
         searchingText = true
         searchTask = Task {
             defer { if ocrToken == token { searchingText = false } }
@@ -291,7 +347,7 @@ final class LibraryModel: ObservableObject {
         defer { if ocrToken == token { searchingText = false } }
         if !filters.text.isEmpty, let store = workspace.localIndex.store {
             var paths = Set<String>()
-            for root in settings.roots { if let result = try? await store.search(SearchRequest(scope: root, content: filters.text)) { paths.formUnion(result.documents.map(\.path)) } }
+            for root in recognitionRoots { if let result = try? await store.search(SearchRequest(scope: root, content: filters.text)) { paths.formUnion(result.documents.map(\.path)) } }
             if ocrToken == token { ocrMatches = paths }
         }
         return items
@@ -379,11 +435,13 @@ final class LibraryModel: ObservableObject {
     func runRules() {
         guard !workspace.jobs.busy else { return }
         if settings.autoInstallers {
-            let values = candidates("Old Installers").prefix(20).filter { (try? $0.revalidate()) != nil }
+            let roots = settings.roots
+            let values = candidates("Old Installers").filter { item in roots.contains { SearchScope.contains(itemPath: item.path, scopePath: $0) } }.prefix(20).filter { (try? $0.revalidate()) != nil }
             if !values.isEmpty { browser.run(OperationRequest(.trash, sources: values.map(\.url))); return }
         }
         if settings.autoScreenshots, let root = settings.roots.first {
-            let values = snapshot.items.filter { $0.screenshot && !$0.onlineOnly && !$0.path.contains("/Screenshots by Month/") }.prefix(20)
+            let roots = settings.roots
+            let values = snapshot.items.filter { item in item.screenshot && !item.onlineOnly && !item.path.contains("/Screenshots by Month/") && roots.contains { SearchScope.contains(itemPath: item.path, scopePath: $0) } }.prefix(20)
             for item in values {
                 guard !workspace.jobs.busy, (try? item.revalidate()) != nil else { break }
                 let date = item.created ?? item.modified; let parts = Calendar.current.dateComponents([.year, .month], from: date)
