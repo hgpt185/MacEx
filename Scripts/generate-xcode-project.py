@@ -51,11 +51,11 @@ test_sources = add("TestSources", "isa = PBXSourcesBuildPhase; buildActionMask =
 test_frameworks = add("TestFrameworks", "isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;")
 common = {"SDKROOT": "macosx", "MACOSX_DEPLOYMENT_TARGET": "14.0", "SWIFT_VERSION": "6.0", "SWIFT_STRICT_CONCURRENCY": "complete", "CLANG_ENABLE_MODULES": "YES", "CODE_SIGN_IDENTITY": "-", "CODE_SIGN_STYLE": "Manual", "ENABLE_APP_SANDBOX": "NO"}
 project_configs = configs("Project", common)
-app_configs = configs("App", {"PRODUCT_NAME": "MacEx", "PRODUCT_BUNDLE_IDENTIFIER": "local.macex.app.uihost", "INFOPLIST_FILE": "Resources/UIHost-Info.plist", "GENERATE_INFOPLIST_FILE": "NO", "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/../Frameworks", "SWIFT_EMIT_LOC_STRINGS": "YES"})
-test_configs = configs("UITest", {"PRODUCT_NAME": "MacExUITests", "PRODUCT_BUNDLE_IDENTIFIER": "local.macex.UITests", "GENERATE_INFOPLIST_FILE": "YES", "TEST_TARGET_NAME": "MacEx"})
-proxy = add("TestProxy", "isa = PBXContainerItemProxy; containerPortal = " + uid("Project") + "; proxyType = 1; remoteGlobalIDString = " + uid("AppTarget") + "; remoteInfo = MacEx;")
+app_configs = configs("App", {"PRODUCT_NAME": "MacEx", "PRODUCT_MODULE_NAME": "MacExUIHost", "PRODUCT_BUNDLE_IDENTIFIER": "local.macex.app.uihost", "INFOPLIST_FILE": "Resources/UIHost-Info.plist", "GENERATE_INFOPLIST_FILE": "NO", "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/../Frameworks", "SWIFT_EMIT_LOC_STRINGS": "YES"})
+test_configs = configs("UITest", {"PRODUCT_NAME": "MacExUITests", "PRODUCT_BUNDLE_IDENTIFIER": "local.macex.UITests", "GENERATE_INFOPLIST_FILE": "YES", "TEST_TARGET_NAME": "MacExUIHost"})
+proxy = add("TestProxy", "isa = PBXContainerItemProxy; containerPortal = " + uid("Project") + "; proxyType = 1; remoteGlobalIDString = " + uid("AppTarget") + "; remoteInfo = MacExUIHost;")
 dependency = add("TestDependency", "isa = PBXTargetDependency; target = " + uid("AppTarget") + "; targetProxy = " + proxy + ";")
-app_target = add("AppTarget", "isa = PBXNativeTarget; buildConfigurationList = " + app_configs + "; buildPhases = " + array([app_sources, app_frameworks]) + "; buildRules = (); dependencies = (); name = MacEx; packageProductDependencies = " + array([library]) + "; productName = MacEx; productReference = " + app_product + '; productType = "com.apple.product-type.application";')
+app_target = add("AppTarget", "isa = PBXNativeTarget; buildConfigurationList = " + app_configs + "; buildPhases = " + array([app_sources, app_frameworks]) + "; buildRules = (); dependencies = (); name = MacExUIHost; packageProductDependencies = " + array([library]) + "; productName = MacEx; productReference = " + app_product + '; productType = "com.apple.product-type.application";')
 test_target = add("TestTarget", "isa = PBXNativeTarget; buildConfigurationList = " + test_configs + "; buildPhases = " + array([test_sources, test_frameworks]) + "; buildRules = (); dependencies = " + array([dependency]) + "; name = MacExUITests; productName = MacExUITests; productReference = " + test_product + '; productType = "com.apple.product-type.bundle.ui-testing";')
 project = add("Project", "isa = PBXProject; attributes = { LastUpgradeCheck = 1600; TargetAttributes = { " + test_target + " = { TestTargetID = " + app_target + "; }; }; }; buildConfigurationList = " + project_configs + "; compatibilityVersion = \"Xcode 15.0\"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = " + main_group + "; productRefGroup = " + product_group + "; projectDirPath = \"\"; projectRoot = \"\"; packageReferences = " + array([local_package]) + "; targets = " + array([app_target, test_target]) + ";")
 destination = root / "MacEx.xcodeproj"
@@ -67,7 +67,7 @@ destination.mkdir(exist_ok=True)
 (destination / "project.pbxproj").write_text("// !$*UTF8*$!\n{ archiveVersion = 1; classes = {}; objectVersion = 60; objects = {\n" + "\n".join(key + " = { " + value + " };" for key, value in objects.items()) + "\n}; rootObject = " + project + "; }\n")
 def buildable(target, product, name):
     return f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{target}" BuildableName="{product}" BlueprintName="{name}" ReferencedContainer="container:MacEx.xcodeproj"/>'
-app_ref = buildable(app_target, "MacEx.app", "MacEx")
+app_ref = buildable(app_target, "MacEx.app", "MacExUIHost")
 test_ref = buildable(test_target, "MacExUITests.xctest", "MacExUITests")
 schemes = destination / "xcshareddata/xcschemes"
 schemes.mkdir(parents=True, exist_ok=True)

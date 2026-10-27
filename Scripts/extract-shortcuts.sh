@@ -14,7 +14,7 @@ elif xcrun --find appintentsmetadataprocessor >/dev/null 2>&1; then
     [[ "$configuration" == release ]] && xcode_configuration=Release
     xcodebuild -project MacEx.xcodeproj -scheme MacEx -configuration "$xcode_configuration" \
         -destination 'generic/platform=macOS' -derivedDataPath .build/app-intents \
-        CODE_SIGNING_ALLOWED=NO PRODUCT_BUNDLE_IDENTIFIER=local.macex.app \
+        CODE_SIGNING_ALLOWED=NO PRODUCT_BUNDLE_IDENTIFIER=local.macex.app PRODUCT_MODULE_NAME=MacEx \
         INFOPLIST_FILE=Resources/Info.plist build > .build/app-intents-build.log 2>&1
     metadata="$PWD/.build/app-intents/Build/Products/$xcode_configuration/MacEx.app/Contents/Resources/Metadata.appintents"
     [[ -d "$metadata" ]] || { print -u2 'Xcode did not produce App Intents metadata. See .build/app-intents-build.log.'; exit 1; }
