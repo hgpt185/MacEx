@@ -1,0 +1,35 @@
+name: Inspect saved UI results
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Build workflow run containing MacEx-UI-results
+        required: true
+        type: number
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: macos-15
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INSPECT_RUN: ${{ inputs.run_id }}
+    steps:
+      - name: Download the isolated result bundle
+        run: gh run download "$INSPECT_RUN" --repo "$GITHUB_REPOSITORY" --name MacEx-UI-results --dir result.xcresult
+      - name: Export summary and failure attachments with full Xcode
+        run: |
+          xcrun xcresulttool get test-results summary --path result.xcresult > summary.json
+          xcrun xcresulttool export attachments --path result.xcresult --output-path exported --only-failures
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: MacEx-UI-inspection
+          path: |
+            summary.json
+            exported
+          retention-days: 7
