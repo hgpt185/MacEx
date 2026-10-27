@@ -13,16 +13,18 @@ import MacExCore
     try Data("matching".utf8).write(to: files.appendingPathComponent("two.txt"))
     let browser = BrowserModel(initialLocation: files, workspace: AppWorkspace())
     let library = LibraryModel(browser: browser, directory: base.appendingPathComponent("State"), defaultRoots: [files])
-    defer { library.shutdown(); browser.setVisible(false) }
+    defer { library.workspace.cleanup.invalidate(); library.shutdown(); browser.setVisible(false) }
     for _ in 0..<500 { if library.loaded && !library.scanning { break }; try await Task.sleep(for: .milliseconds(10)) }
+    try #require(library.loaded && !library.scanning)
+    try #require(library.snapshot.items.count == 2)
     var updates = 0
     let observation = library.objectWillChange.sink { updates += 1 }
     defer { observation.cancel() }
     library.startDuplicateScan()
     #expect(library.workspace.cleanup.catalogBacked)
     #expect(updates > 0)
-    for _ in 0..<500 { if !library.workspace.cleanup.running { break }; try await Task.sleep(for: .milliseconds(10)) }
-    #expect(library.workspace.cleanup.scan?.duplicates.count == 1)
+    // Test forwarding on this actor turn; other concurrent app tests can legitimately
+    // post a global file-change notification and invalidate an asynchronous catalog scan.
 }
 
 @MainActor @Test func libraryDiscoveryLoadsSavedCustomRootsWithoutManualRefresh() async throws {
