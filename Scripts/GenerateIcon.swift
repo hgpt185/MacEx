@@ -1,31 +1,26 @@
 import AppKit
+import ImageIO
 
+guard CommandLine.arguments.count == 2 else {
+    fatalError("Usage: swift Scripts/GenerateIcon.swift <destination.iconset>")
+}
+let sourceURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("Resources/AppIcon.png")
+guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
+      let image = CGImageSourceCreateImageAtIndex(source, 0, nil), image.width == image.height else {
+    fatalError("Expected a square source image at \(sourceURL.path)")
+}
 let destination = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
 for size in [16, 32, 128, 256, 512] {
     for scale in [1, 2] {
         let pixels = size * scale
-        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
-        let factor = CGFloat(pixels) / 1024
-        NSAffineTransform().apply { $0.scale(by: factor); $0.concat() }
-        NSColor(calibratedWhite: 0.97, alpha: 1).setFill()
-        NSBezierPath(roundedRect: NSRect(x: 62, y: 62, width: 900, height: 900), xRadius: 205, yRadius: 205).fill()
-        NSColor(calibratedRed: 0.40, green: 0.68, blue: 0.98, alpha: 1).setFill()
-        NSBezierPath(roundedRect: NSRect(x: 225, y: 350, width: 570, height: 355), xRadius: 55, yRadius: 55).fill()
-        NSBezierPath(roundedRect: NSRect(x: 225, y: 620, width: 238, height: 125), xRadius: 35, yRadius: 35).fill()
-        NSColor(calibratedRed: 0.12, green: 0.40, blue: 0.86, alpha: 1).setFill()
-        NSBezierPath(roundedRect: NSRect(x: 225, y: 278, width: 570, height: 345), xRadius: 55, yRadius: 55).fill()
-        NSColor.white.setFill()
-        NSBezierPath(roundedRect: NSRect(x: 466, y: 278, width: 66, height: 243), xRadius: 27, yRadius: 27).fill()
-        NSBezierPath(roundedRect: NSRect(x: 466, y: 472, width: 176, height: 54), xRadius: 25, yRadius: 25).fill()
-        NSGraphicsContext.restoreGraphicsState()
+        let context = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: pixels, height: pixels))
+        let bitmap = NSBitmapImageRep(cgImage: context.makeImage()!)
         let suffix = scale == 2 ? "@2x" : ""
         try bitmap.representation(using: .png, properties: [:])!.write(to: destination.appendingPathComponent("icon_\(size)x\(size)\(suffix).png"))
     }
-}
-extension NSAffineTransform {
-    func apply(_ body: (NSAffineTransform) -> Void) { body(self) }
 }

@@ -47,6 +47,15 @@ library = add("CoreProduct", "isa = XCSwiftPackageProductDependency; package = "
 library_build = add("CoreBuild", "isa = PBXBuildFile; productRef = " + library + ";")
 app_sources = add("AppSources", "isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = " + array(source_builds) + "; runOnlyForDeploymentPostprocessing = 0;")
 app_frameworks = add("AppFrameworks", "isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = " + array([library_build]) + "; runOnlyForDeploymentPostprocessing = 0;")
+icon_script = '''set -eu
+mkdir -p "${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
+xcrun swift -module-cache-path "${DERIVED_FILE_DIR}/IconModuleCache" "${SRCROOT}/Scripts/GenerateIcon.swift" "${DERIVED_FILE_DIR}/MacEx.iconset"
+iconutil -c icns "${DERIVED_FILE_DIR}/MacEx.iconset" -o "${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/MacEx.icns"
+'''
+app_icon = add("AppIcon", "isa = PBXShellScriptBuildPhase; buildActionMask = 2147483647; files = (); "
+               "inputPaths = " + array([q("$(SRCROOT)/Resources/AppIcon.png"), q("$(SRCROOT)/Scripts/GenerateIcon.swift")]) + "; "
+               "outputPaths = " + array([q("$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/MacEx.icns")]) + "; "
+               "name = \"Generate App Icon\"; runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/sh; shellScript = " + q(icon_script) + ";")
 test_sources = add("TestSources", "isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = " + array([test_build]) + "; runOnlyForDeploymentPostprocessing = 0;")
 test_frameworks = add("TestFrameworks", "isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;")
 common = {"SDKROOT": "macosx", "MACOSX_DEPLOYMENT_TARGET": "14.0", "SWIFT_VERSION": "6.0", "SWIFT_STRICT_CONCURRENCY": "complete", "CLANG_ENABLE_MODULES": "YES", "CODE_SIGN_IDENTITY": "-", "CODE_SIGN_STYLE": "Manual", "ENABLE_APP_SANDBOX": "NO"}
@@ -55,7 +64,7 @@ app_configs = configs("App", {"PRODUCT_NAME": "MacEx", "PRODUCT_MODULE_NAME": "$
 test_configs = configs("UITest", {"PRODUCT_NAME": "MacExUITests", "PRODUCT_BUNDLE_IDENTIFIER": "local.macex.UITests", "GENERATE_INFOPLIST_FILE": "YES", "TEST_TARGET_NAME": "MacExUIHost"})
 proxy = add("TestProxy", "isa = PBXContainerItemProxy; containerPortal = " + uid("Project") + "; proxyType = 1; remoteGlobalIDString = " + uid("AppTarget") + "; remoteInfo = MacExUIHost;")
 dependency = add("TestDependency", "isa = PBXTargetDependency; target = " + uid("AppTarget") + "; targetProxy = " + proxy + ";")
-app_target = add("AppTarget", "isa = PBXNativeTarget; buildConfigurationList = " + app_configs + "; buildPhases = " + array([app_sources, app_frameworks]) + "; buildRules = (); dependencies = (); name = MacExUIHost; packageProductDependencies = " + array([library]) + "; productName = MacEx; productReference = " + app_product + '; productType = "com.apple.product-type.application";')
+app_target = add("AppTarget", "isa = PBXNativeTarget; buildConfigurationList = " + app_configs + "; buildPhases = " + array([app_sources, app_frameworks, app_icon]) + "; buildRules = (); dependencies = (); name = MacExUIHost; packageProductDependencies = " + array([library]) + "; productName = MacEx; productReference = " + app_product + '; productType = "com.apple.product-type.application";')
 test_target = add("TestTarget", "isa = PBXNativeTarget; buildConfigurationList = " + test_configs + "; buildPhases = " + array([test_sources, test_frameworks]) + "; buildRules = (); dependencies = " + array([dependency]) + "; name = MacExUITests; productName = MacExUITests; productReference = " + test_product + '; productType = "com.apple.product-type.bundle.ui-testing";')
 project = add("Project", "isa = PBXProject; attributes = { LastUpgradeCheck = 1600; TargetAttributes = { " + test_target + " = { TestTargetID = " + app_target + "; }; }; }; buildConfigurationList = " + project_configs + "; compatibilityVersion = \"Xcode 15.0\"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = " + main_group + "; productRefGroup = " + product_group + "; projectDirPath = \"\"; projectRoot = \"\"; packageReferences = " + array([local_package]) + "; targets = " + array([app_target, test_target]) + ";")
 destination = root / "MacEx.xcodeproj"

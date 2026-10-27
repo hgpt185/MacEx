@@ -92,7 +92,7 @@ struct SingleWindowView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "square.stack.3d.up.fill").font(.system(size: 24)).foregroundStyle(accent)
+                Image(nsImage: NSApplication.shared.applicationIconImage).resizable().scaledToFit().frame(width: 30, height: 30)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("MacEx").font(.system(size: 20, weight: .semibold))
                     if CommandLine.arguments.contains("--state-directory") || Bundle.main.bundleIdentifier == "local.macex.workflowqa" {

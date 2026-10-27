@@ -84,7 +84,7 @@ final class MacExUITests: XCTestCase {
             app.typeKey(",", modifierFlags: .command)
             let choice = app.radioButtons[second ?? ""]
             XCTAssertTrue(choice.waitForExistence(timeout: 5))
-            XCTAssertEqual(choice.value as? String, "1")
+            XCTAssertEqual((choice.value as? NSNumber)?.intValue, 1, choice.debugDescription)
             app.terminate(); app.launch()
             XCTAssertTrue(app.buttons["appearance-toggle"].waitForExistence(timeout: 10))
             XCTAssertEqual(app.buttons["appearance-toggle"].value as? String, second)
@@ -95,7 +95,7 @@ final class MacExUITests: XCTestCase {
         try withFixture { app, root in
             try FileManager.default.copyItem(at: root.appendingPathComponent("Welcome.txt"), to: root.appendingPathComponent("Welcome copy.txt"))
             app.typeKey("n", modifierFlags: .command)
-            let add = app.buttons["library-sidebar-add-folder"]
+            let add = app.buttons["Add Folder…"].firstMatch
             XCTAssertTrue(add.waitForExistence(timeout: 5)); add.click()
             let useFolder = app.buttons["Use This Folder"].firstMatch
             XCTAssertTrue(useFolder.waitForExistence(timeout: 5))
@@ -103,7 +103,7 @@ final class MacExUITests: XCTestCase {
             useFolder.click()
             app.buttons["library-sidebar-duplicates"].click()
             let scan = app.buttons["Scan Library"]
-            XCTAssertTrue(scan.waitForExistence(timeout: 5))
+            XCTAssertTrue(scan.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: scan)], timeout: 10), .completed)
             scan.click()
             XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "2 identical files")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
