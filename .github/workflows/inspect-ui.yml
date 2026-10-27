@@ -25,11 +25,14 @@ jobs:
       - name: Export summary and failure attachments with full Xcode
         run: |
           xcrun xcresulttool get test-results summary --path result.xcresult > summary.json
-          xcrun xcresulttool export attachments --path result.xcresult --output-path exported --only-failures
+          xcrun xcresulttool export attachments --path result.xcresult --output-path exported
+          find exported -type f -name '*.mp4' -delete
+          xcrun xcresulttool get test-results activities --path result.xcresult --test-id 'MacExUITests/testTextPreviewDoesNotLaunchAnotherWindow()' > activities.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: MacEx-UI-inspection
           path: |
             summary.json
+            activities.json
             exported
           retention-days: 7
