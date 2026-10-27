@@ -26,7 +26,8 @@ jobs:
         run: |
           xcrun xcresulttool get test-results summary --path result.xcresult > summary.json
           xcrun xcresulttool export attachments --path result.xcresult --output-path exported
-          find exported -type f -name '*.mp4' -delete
+          xcrun xcresulttool export diagnostics --path result.xcresult --output-path diagnostics
+          find diagnostics -type f > diagnostic-files.txt
           xcrun xcresulttool get test-results activities --path result.xcresult --test-id 'MacExUITests/testTextPreviewDoesNotLaunchAnotherWindow()' > activities.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -35,4 +36,6 @@ jobs:
             summary.json
             activities.json
             exported
+            diagnostics
+            diagnostic-files.txt
           retention-days: 7
