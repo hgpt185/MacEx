@@ -50,10 +50,15 @@ That optional branch uploads app/image archives to Apple's notary service. No si
 With full Xcode and Swift 6, run:
 
 ```sh
+mkdir -p /private/tmp/MacExUITestFixtures
 xcodebuild -project MacEx.xcodeproj -scheme MacEx -destination 'platform=macOS' test
 ```
 
-The thin host uses `MacExCore`, identifier `local.macex.app.uihost`, and test-created workspace directories. It does not terminate the normal MacEx session. Regenerate the checked-in host after app source or Info.plist changes:
+The thin host uses `MacExCore`, identifier `local.macex.app.uihost`, and test-created workspace directories. It does not terminate the normal MacEx session.
+
+The sandboxed UI test runner has write access only to the dedicated `/private/tmp/MacExUITestFixtures/` fixture directory outside its container. Fixture content and state occupy separate sibling directories. The test entitlement is not applied to the app or release packages; CI checks that separation before running the UI tests.
+
+Regenerate the checked-in host after app source or Info.plist changes:
 
 ```sh
 python3 Scripts/generate-xcode-project.py

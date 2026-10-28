@@ -21,9 +21,25 @@ jobs:
         run: zsh Scripts/test-local-search-offline.sh
       - name: Verify the single-window UI with Xcode
         run: |
+          mkdir -p /private/tmp/MacExUITestFixtures
           xcodebuild -project MacEx.xcodeproj -scheme MacEx -configuration Debug \
             -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/ui-tests \
-            -resultBundlePath .build/single-window.xcresult test
+            build-for-testing
+          python3 - <<'PY'
+          import plistlib, subprocess
+          def entitlements(path):
+              data = subprocess.check_output(['codesign', '-d', '--entitlements', ':-', path])
+              return plistlib.loads(data) if data.strip() else {}
+          key = 'com.apple.security.temporary-exception.files.absolute-path.read-write'
+          runner = entitlements('.build/ui-tests/Build/Products/Debug/MacExUITests-Runner.app')
+          assert runner.get('com.apple.security.app-sandbox') is True
+          assert runner.get(key) == ['/private/tmp/MacExUITestFixtures/']
+          assert key not in entitlements('.build/ui-tests/Build/Products/Debug/MacEx.app')
+          print('Verified sandboxed test runner has only dedicated fixture write access; app has no fixture entitlement.')
+          PY
+          xcodebuild -project MacEx.xcodeproj -scheme MacEx -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/ui-tests \
+            -resultBundlePath .build/single-window.xcresult test-without-building
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

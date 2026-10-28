@@ -6,7 +6,7 @@ final class MacExUITests: XCTestCase {
         continueAfterFailure = false
         // Runner and app can have different temporary directories. Use a shared,
         // unprotected location without changing production cleanup exclusions.
-        let base = URL(fileURLWithPath: "/private/tmp", isDirectory: true).appendingPathComponent("MacEx-one-window-\(UUID().uuidString)")
+        let base = URL(fileURLWithPath: "/private/tmp/MacExUITestFixtures", isDirectory: true).appendingPathComponent("MacEx-one-window-\(UUID().uuidString)")
         // App state must stay outside the watched fixture folder: saving state otherwise
         // generates file events that refresh the catalog and invalidate duplicate results.
         let root = base.appendingPathComponent("Files")
