@@ -4,7 +4,9 @@ import XCTest
 final class MacExUITests: XCTestCase {
     @MainActor private func withFixture(_ check: @MainActor (XCUIApplication, URL) throws -> Void) throws {
         continueAfterFailure = false
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent("MacEx-one-window-\(UUID().uuidString)")
+        // Runner and app can have different temporary directories. Use a shared,
+        // unprotected location without changing production cleanup exclusions.
+        let base = URL(fileURLWithPath: "/private/tmp", isDirectory: true).appendingPathComponent("MacEx-one-window-\(UUID().uuidString)")
         // App state must stay outside the watched fixture folder: saving state otherwise
         // generates file events that refresh the catalog and invalidate duplicate results.
         let root = base.appendingPathComponent("Files")
@@ -109,7 +111,10 @@ final class MacExUITests: XCTestCase {
             XCTAssertTrue(scan.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: scan)], timeout: 10), .completed)
             scan.click()
-            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "2 identical files")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+            let results = app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "2 identical files")).firstMatch
+            let found = results.waitForExistence(timeout: 10)
+            let scanStatus = app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "items checked")).firstMatch
+            XCTAssertTrue(found, "Fixture: \(root.path)\nScan: \(String(describing: scanStatus.value))\n\(app.debugDescription)")
             XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "0 selected")).firstMatch.exists)
             XCTAssertEqual(app.windows.count, 1)
             XCTAssertEqual(app.sheets.count, 0)
