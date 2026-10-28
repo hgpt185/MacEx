@@ -45,6 +45,30 @@ import MacExCore
     #expect(library.settings.roots == [custom.path])
 }
 
+@MainActor @Test func libraryDiscoveryStartupNotificationWaitsForSavedRoots() async throws {
+    let base = URL(fileURLWithPath: "/private/tmp", isDirectory: true).appendingPathComponent("MacEx-discovery-startup-\(UUID().uuidString)")
+    let state = base.appendingPathComponent("state"), custom = base.appendingPathComponent("custom"), ordinary = base.appendingPathComponent("Desktop")
+    for root in [state, custom, ordinary] { try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) }
+    defer { try? FileManager.default.removeItem(at: base) }
+    try Data("custom".utf8).write(to: custom.appendingPathComponent("custom.pdf"))
+    try Data("personal".utf8).write(to: ordinary.appendingPathComponent("personal.txt"))
+    var settings = LibrarySettings(); settings.roots = [custom.path]
+    try JSONEncoder().encode(settings).write(to: state.appendingPathComponent("library-settings.json"))
+    let browser = BrowserModel(initialLocation: custom, workspace: AppWorkspace())
+    let library = LibraryModel(browser: browser, directory: state, defaultRoots: [ordinary])
+    defer { library.shutdown(); browser.setVisible(false) }
+    // This actor turn precedes the asynchronous settings load, as can happen when
+    // another workspace posts a restore notification during startup.
+    #expect(!library.loaded)
+    NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
+    #expect(!library.scanning)
+    for _ in 0..<500 { if library.loaded && !library.scanning { break }; try await Task.sleep(for: .milliseconds(10)) }
+    try #require(library.loaded && !library.scanning)
+    #expect(library.settings.roots == [custom.path])
+    #expect(Set(library.snapshot.roots) == [custom.path, ordinary.path])
+    #expect(Set(library.snapshot.items.map(\.name)) == ["custom.pdf", "personal.txt"])
+}
+
 @MainActor @Test func libraryDiscoveryAddsDefaultsPreservesCustomRootsAndPersistsOptOut() async throws {
     let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("MacEx-discovery-defaults-\(UUID().uuidString)")
     let state = base.appendingPathComponent("state"), custom = base.appendingPathComponent("custom"), ordinary = base.appendingPathComponent("Desktop")

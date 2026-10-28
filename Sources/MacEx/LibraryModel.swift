@@ -214,7 +214,6 @@ final class LibraryModel: ObservableObject {
     }
     func load() {
         Task {
-            defer { loaded = true }
             do {
                 let directory = directory
                 let data = try await Task.detached(priority: .utility) { () -> (LibrarySettings?, LibrarySnapshot?, [TrashHistoryItem]?) in
@@ -233,8 +232,9 @@ final class LibraryModel: ObservableObject {
                 trashHistory = Array((data.2 ?? []).suffix(500))
                 onSettingsChanged?(); startRuleTimer(); updates.configure(directory: directory)
                 save()
+                loaded = true
                 if !discoveryRoots.isEmpty { refresh() }
-            } catch { canWrite = false; status = "Saved library preserved: \(error.localizedDescription)" }
+            } catch { canWrite = false; status = "Saved library preserved: \(error.localizedDescription)"; loaded = true }
         }
     }
     func save() {
@@ -284,7 +284,8 @@ final class LibraryModel: ObservableObject {
         }
     }
     func refresh() {
-        guard !scanning else { return }
+        // Startup reconciliation covers notifications received before saved roots load.
+        guard loaded, !scanning else { return }
         let paths = discoveryRoots
         guard !paths.isEmpty else {
             snapshot = LibrarySnapshot(roots: [], complete: true)
