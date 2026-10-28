@@ -70,7 +70,7 @@ final class Thumbnails {
             guard var entry = pending[key], !entry.callbacks.isEmpty else { continue }
             entry.started = true; pending[key] = entry; active += 1
             let identity = ObjectIdentifier(entry.request)
-            QLThumbnailGenerator.shared.generateBestRepresentation(for: entry.request) { [weak self] representation, _ in
+            QLThumbnailGenerator.shared.generateBestRepresentation(for: entry.request) { @Sendable [weak self] representation, _ in
                 let image = representation?.cgImage
                 Task { @MainActor [weak self] in self?.finish(key, request: identity, image: image) }
             }
