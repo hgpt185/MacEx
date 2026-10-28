@@ -4,12 +4,15 @@ import XCTest
 final class MacExUITests: XCTestCase {
     @MainActor private func withFixture(_ check: @MainActor (XCUIApplication, URL) throws -> Void) throws {
         continueAfterFailure = false
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MacEx-one-window-\(UUID().uuidString)")
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("MacEx-one-window-\(UUID().uuidString)")
+        // App state must stay outside the watched fixture folder: saving state otherwise
+        // generates file events that refresh the catalog and invalidate duplicate results.
+        let root = base.appendingPathComponent("Files")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Destination"), withIntermediateDirectories: true)
         try Data("Disposable inline preview fixture\n".utf8).write(to: root.appendingPathComponent("Welcome.txt"))
         let app = XCUIApplication(bundleIdentifier: "local.macex.app.uihost")
-        defer { app.terminate(); try? FileManager.default.removeItem(at: root) }
-        app.launchArguments = ["--folder", root.path, "--state-directory", root.appendingPathComponent(".State").path, "-fileAccessChoiceSeen", "YES"]
+        defer { app.terminate(); try? FileManager.default.removeItem(at: base) }
+        app.launchArguments = ["--folder", root.path, "--state-directory", base.appendingPathComponent("State").path, "-fileAccessChoiceSeen", "YES"]
         app.launch(); XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
         try check(app, root)
     }
