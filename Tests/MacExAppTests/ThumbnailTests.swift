@@ -18,7 +18,9 @@ import MacExCore
             completions += 1
         }
         #expect(token != nil)
-        let deadline = ContinuousClock.now + .seconds(15)
+        // This checks callback isolation, not a Quick Look latency guarantee. A cold
+        // provider and concurrent Vision work can delay delivery on CI's main actor.
+        let deadline = ContinuousClock.now + .seconds(60)
         while completions == 0 && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
