@@ -1,5 +1,7 @@
 # MacEx
 
+<img src="Resources/AppIcon.png" width="96" alt="MacEx app icon">
+
 A native, open-source Mac file library. **0.8.1 adds automatic discovery of your files and installed apps, aligned full-row sidebar buttons, and persistent System/Light/Dark appearance** to the single-window workflow: Home, categories, recent shelves, download sources, visible search filters, previews, music, cleanup, connections and settings.
 
 Files open inside MacEx. Space and double-click preview them in the existing window. Folder selection, rename, conflict handling, host-key review and transfer destinations use in-window controls. MacEx does not launch Finder, external file applications, separate Quick Look panels, browser windows, or additional file-manager windows for these actions. Dock reopening and global Quick Search reuse the same window. macOS-owned menus and permission prompts remain system UI.
@@ -100,3 +102,17 @@ Tests use isolated temporary fixtures. The optional cross-volume test requires a
 Library metadata/settings, OCR data, Trash history, saved connections and window state live under `~/Library/Application Support/MacEx/` with private app-owned files. SSH secrets use Keychain only after explicit selection. MacEx runs under the normal macOS account and does not bypass file permissions, privacy controls or SIP. System permission changes must be made manually by the user; the app does not launch System Settings.
 
 See [the 0.8.1 verification](docs/verification/0.8.1.md) for current evidence and pending release checks. [The 0.8.0 workflow verification](docs/P8-VERIFICATION.md) and earlier P1–P7 reports describe their respective versions, including historical UI superseded by the single-window redesign.
+
+## Videos
+
+Demo and marketing clips are built with [Remotion](https://remotion.dev) in [`video/`](video/), a self-contained Node.js project that does not affect the Swift build. It requires Node.js 20.19+.
+
+```sh
+cd video
+npm install
+npm run studio            # live preview in Remotion Studio
+npm run render:intro      # out/intro.mp4, 1920×1080
+npm run render:spotlight  # out/feature-spotlight.mp4, 1080×1920
+```
+
+Compositions, assets and authoring conventions are documented in [`video/README.md`](video/README.md). `node_modules`, rendered output and Remotion bundles stay git-ignored.

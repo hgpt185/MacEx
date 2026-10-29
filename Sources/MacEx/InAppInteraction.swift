@@ -95,7 +95,12 @@ struct InAppInteractionView: View {
                             }
                         }
                         List(model.entries, selection: $model.selection) { entry in
-                            HStack { Label(entry.name, systemImage: entry.isFolder ? "folder.fill" : "doc"); Spacer(); Text(entry.kind).foregroundStyle(.secondary).font(.caption) }
+                            HStack {
+                                Image(nsImage: Thumbnails.shared.icon(entry)).resizable().scaledToFit().frame(width: 18, height: 18)
+                                Text(entry.name).lineLimit(1).truncationMode(.middle).layoutPriority(1)
+                                Spacer()
+                                Text(entry.kind).foregroundStyle(.secondary).font(.caption).lineLimit(1)
+                            }
                                 .tag(entry.url).contentShape(Rectangle()).onTapGesture(count: 2) {
                                     if entry.isFolder { model.read(entry.url) } else if request.kind == .file { model.finish(entry.url.path) }
                                 }

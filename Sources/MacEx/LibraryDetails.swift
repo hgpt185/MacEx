@@ -84,7 +84,7 @@ struct LibraryInspector: View {
                         if let item = model.activeItem {
                             Grid(alignment: .leading, horizontalSpacing: 15, verticalSpacing: 8) {
                                 detail("Kind", item.kind.rawValue)
-                                detail("Size", item.kind == .apps ? "Bundle; not recursively sized" : ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file))
+                                detail("Size", item.package ? "Bundle; not recursively sized" : ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file))
                                 detail("Added", item.added?.formatted() ?? "Not available")
                                 detail("Created", item.created?.formatted() ?? "Not available")
                                 detail("Modified", item.modified.formatted())

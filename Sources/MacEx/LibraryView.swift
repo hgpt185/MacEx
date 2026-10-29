@@ -19,7 +19,16 @@ struct LibraryThumbnail: View {
     var symbol = "doc"
     @StateObject private var state = LibraryThumbnailState()
     var body: some View {
-        Group { if let image = state.image { Image(nsImage: image).resizable().scaledToFit() } else { Image(systemName: symbol).resizable().scaledToFit().foregroundStyle(.secondary.opacity(0.5)).padding(24) } }
+        Group {
+            if let image = state.image { Image(nsImage: image).resizable().scaledToFit() }
+            else {
+                GeometryReader { geometry in
+                    Image(systemName: symbol).resizable().scaledToFit().foregroundStyle(.secondary.opacity(0.65))
+                        .padding(min(geometry.size.width, geometry.size.height) * 0.22)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
             .task(id: url) { state.load(url) }.onDisappear { state.cancel() }
     }
 }
@@ -245,20 +254,30 @@ struct SingleWindowView: View {
     }
     private var greeting: String { let hour = Calendar.current.component(.hour, from: Date()); return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening" }
     private func color(_ index: Int) -> Color { guard model.settings.playful else { return Color.secondary.opacity(0.10) }; return [Color.purple, .blue, .orange, .teal, .yellow, .pink][index % 6].opacity(0.12) }
+    private func folderTone(_ index: Int) -> Color {
+        model.settings.playful ? [Color.purple, .blue, .orange, .teal, Color(red: 0.70, green: 0.48, blue: 0.07), .pink][index % 6] : accent
+    }
     private func categoryCard(_ kind: LibraryKind, index: Int) -> some View {
         let values = model.snapshot.items.filter { $0.kind == kind }
+        let count = "\(values.count.formatted()) \(values.count == 1 ? "item" : "items")"
+        let storage = kind == .apps ? "Application bundles" : bytes(values.reduce(0) { $0 + $1.bytes })
         return Button { model.show(.kind(kind)) } label: {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack { Image(systemName: kind.symbol).font(.system(size: 26, weight: .light)); Spacer(); Image(systemName: "ellipsis") }
-                Text(kind.rawValue).font(.system(size: 18, weight: .medium))
-                Divider()
-                HStack(spacing: 4) {
-                    ForEach(Array(values.prefix(3))) { item in LibraryThumbnail(url: item.url, symbol: kind.symbol).frame(width: 26, height: 26).background(.background, in: Circle()).clipShape(Circle()) }
-                    Spacer(); Text("\(values.count.formatted()) \(values.count == 1 ? "item" : "items")").font(.caption).foregroundStyle(.secondary)
+            LibraryFolderCard(title: kind.rawValue, symbol: kind.symbol, detail: "\(count) · \(storage)", tone: folderTone(index)) {
+                ForEach(Array(values.prefix(3).enumerated()), id: \.element.id) { offset, item in
+                    LibraryThumbnail(url: item.url, symbol: kind.symbol)
+                        .frame(width: 40, height: 48)
+                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 4))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(.primary.opacity(0.08), lineWidth: 0.5))
+                        .rotationEffect(.degrees(Double(offset - 1) * 5))
+                        .shadow(color: .black.opacity(0.08), radius: 1, y: 1)
                 }
-                Text(kind == .apps ? "Application bundles" : bytes(values.reduce(0) { $0 + $1.bytes })).font(.caption).foregroundStyle(.secondary)
-            }.padding(20).frame(maxWidth: .infinity, minHeight: 155, alignment: .leading).background(color(index), in: RoundedRectangle(cornerRadius: 18)).overlay(alignment: .topLeading) { RoundedRectangle(cornerRadius: 5).fill(color(index)).frame(width: 65, height: 10).offset(x: 0, y: -5) }
-        }.buttonStyle(.plain)
+            }
+        }.buttonStyle(.plain).contentShape(Rectangle())
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("\(kind.rawValue), \(count), \(storage)")
+            .accessibilityIdentifier("library-category-" + kind.rawValue.lowercased())
+            .help("Open \(kind.rawValue.lowercased())")
     }
     private var filesPage: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -274,7 +293,7 @@ struct SingleWindowView: View {
                 Table(model.items, selection: $model.selected) {
                     TableColumn("Name") { item in HStack { LibraryThumbnail(url: item.url, symbol: item.kind.symbol).frame(width: 28, height: 28); Text(item.name) }.onTapGesture(count: 2) { model.preview(item.url) } }.width(min: 170)
                     TableColumn("Kind") { Text($0.kind.rawValue) }.width(80)
-                    TableColumn("Size") { Text($0.kind == .apps ? "—" : bytes($0.bytes)) }.width(90)
+                    TableColumn("Size") { Text($0.package ? "—" : bytes($0.bytes)) }.width(90)
                     TableColumn("Added") { Text(($0.added ?? $0.created)?.formatted(date: .abbreviated, time: .omitted) ?? "Unknown") }.width(105)
                     TableColumn("From") { Text($0.source ?? "Unknown") }.width(min: 80)
                 }.contextMenu(forSelectionType: String.self) { _ in selectionActions } primaryAction: { selection in
@@ -338,11 +357,12 @@ struct SingleWindowView: View {
     private func fileCard(_ item: LibraryFile) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .topTrailing) {
-                LibraryThumbnail(url: item.url, symbol: item.onlineOnly ? "icloud" : item.kind.symbol).frame(height: model.settings.cardSize * 0.72).frame(maxWidth: .infinity).background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
+                LibraryThumbnail(url: item.url, symbol: item.onlineOnly ? "icloud" : item.kind.symbol).frame(height: model.settings.cardSize * 0.72).frame(maxWidth: .infinity).background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12)).clipShape(RoundedRectangle(cornerRadius: 12))
                 if item.kind == .images || item.url.pathExtension.lowercased() == "pdf" { Button { model.copyText([item.url]) } label: { Image(systemName: "doc.on.clipboard").padding(7).background(.regularMaterial, in: Circle()) }.buttonStyle(.plain).accessibilityLabel("Copy Text").help("Copy Text").padding(6).disabled(item.onlineOnly) }
             }
-            Text(item.name).font(.system(size: 12, weight: .medium)).lineLimit(2)
-            Text(item.onlineOnly ? "Online only · skipped" : "\(item.kind.rawValue) · \(bytes(item.bytes))").font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(item.name).font(.system(size: 12, weight: .medium)).lineLimit(2).truncationMode(.middle)
+            Text(item.onlineOnly ? "Online only · skipped" : item.package ? "\(item.kind.rawValue) · Bundle size unknown" : "\(item.kind.rawValue) · \(bytes(item.bytes))")
+                .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
         }.padding(8).background(model.selected.contains(item.path) ? accent.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 14)).contentShape(Rectangle())
             .onTapGesture(count: 2) { model.selected = [item.path]; model.preview(item.url) }
             .onTapGesture { if NSEvent.modifierFlags.contains(.command) { if model.selected.contains(item.path) { model.selected.remove(item.path) } else { model.selected.insert(item.path) } } else { model.selected = [item.path] } }
@@ -386,13 +406,19 @@ struct SingleWindowView: View {
     private var sourcePage: some View { ScrollView { VStack(alignment: .leading, spacing: 22) { Text("Downloaded From").font(.largeTitle).bold(); Text("Sources come from existing download metadata. Missing sources stay unknown; no website is contacted.").foregroundStyle(.secondary); sourceCards }.padding(28) } }
     private var sourceCards: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 14)], spacing: 14) {
-            ForEach(model.sources, id: \.0) { source in Button { model.show(.source(source.0)) } label: { HStack { Image(systemName: "globe").font(.title2).foregroundStyle(accent); VStack(alignment: .leading, spacing: 5) { Text(source.0).font(.headline).lineLimit(1); Text("\(source.1) files · \(bytes(source.2))").font(.caption).foregroundStyle(.secondary) }; Spacer() }.padding(16).background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 12)) }.buttonStyle(.plain) }
+            ForEach(model.sources, id: \.0) { source in Button { model.show(.source(source.0)) } label: { HStack { Image(systemName: "globe").font(.title2).foregroundStyle(accent); VStack(alignment: .leading, spacing: 5) { Text(source.0).font(.headline).lineLimit(1).truncationMode(.middle); Text("\(source.1) files · \(bytes(source.2))").font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85) }; Spacer() }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 12)) }.buttonStyle(.plain).contentShape(Rectangle()) }
         }
     }
     private func cleanupCard(_ name: String, _ index: Int) -> some View {
         let values = model.candidates(name)
         return Button { model.cleanupName = name; model.show(.cleanup) } label: {
-            VStack(alignment: .leading, spacing: 10) { Image(systemName: ["arrow.down.circle", "shippingbox", "viewfinder", "play.rectangle"][index % 4]).font(.title2); Text(name).font(.callout); Text(name == "Unused Apps" ? "\(values.count) candidates" : bytes(values.reduce(0) { $0 + $1.bytes })).font(.system(size: 23, weight: .semibold)); Text("\(values.count) items to review").font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading).padding(18).background(color(index), in: RoundedRectangle(cornerRadius: 15))
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: ["arrow.down.circle", "shippingbox", "viewfinder", "play.rectangle"][index % 4]).font(.title2)
+                Text(name).font(.callout.weight(.medium)).lineLimit(2).frame(minHeight: 34, alignment: .topLeading)
+                Text(name == "Unused Apps" ? "\(values.count) candidates" : bytes(values.reduce(0) { $0 + $1.bytes }))
+                    .font(.system(size: 23, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.75)
+                Text("\(values.count) items to review").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }.frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading).padding(18).background(color(index), in: RoundedRectangle(cornerRadius: 15))
         }.buttonStyle(.plain)
     }
     private var cleanupPage: some View {

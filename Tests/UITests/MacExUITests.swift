@@ -43,6 +43,20 @@ final class MacExUITests: XCTestCase {
             app.buttons["Cancel"].firstMatch.click()
         }
     }
+    @MainActor func testFolderCategoryTilesNavigateAcrossTheirWholeArea() throws {
+        try withFixture { app, _ in
+            for (identifier, title) in [("images", "Images"), ("documents", "Documents"), ("apps", "Apps")] {
+                app.typeKey("n", modifierFlags: .command)
+                let folder = app.buttons["library-category-" + identifier]
+                XCTAssertTrue(folder.waitForExistence(timeout: 5))
+                folder.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.85)).click()
+                let heading = app.staticTexts["library-page-title"]
+                XCTAssertTrue(heading.waitForExistence(timeout: 5))
+                XCTAssertTrue((heading.value as? String)?.hasPrefix(title) == true)
+                XCTAssertEqual(app.windows.count, 1)
+            }
+        }
+    }
     @MainActor func testTextPreviewDoesNotLaunchAnotherWindow() throws {
         try withFixture { app, _ in
             app.typeKey("2", modifierFlags: .command)

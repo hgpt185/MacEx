@@ -40,6 +40,7 @@ import MacExCore
         // Draw the supplied artwork directly: newer macOS versions otherwise shrink
         // legacy ICNS artwork into an additional rounded background in the Dock.
         if let url = Bundle.main.url(forResource: "MacEx", withExtension: "icns"), let image = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = image
             let tile = NSApp.dockTile
             let artwork = NSImageView(frame: NSRect(origin: .zero, size: tile.size))
             artwork.image = image; artwork.imageScaling = .scaleProportionallyUpOrDown

@@ -111,8 +111,8 @@ struct FileTable: NSViewRepresentable {
                 cell.textField?.stringValue = entry.name
                 cell.textField?.textColor = entry.isHidden ? .secondaryLabelColor : .labelColor
                 if entry.isFolder {
-                    cell.imageView?.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: "Folder")
-                    cell.imageView?.contentTintColor = .systemBlue
+                    cell.imageView?.image = NSWorkspace.shared.icon(for: UTType.folder)
+                    cell.imageView?.contentTintColor = nil
                 } else if entry.identity.isSymbolicLink {
                     cell.imageView?.image = NSImage(systemSymbolName: "link", accessibilityDescription: "Symbolic link")
                     cell.imageView?.contentTintColor = .secondaryLabelColor

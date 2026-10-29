@@ -104,7 +104,7 @@ struct FileIcons: NSViewRepresentable {
         _ = view
         cancelThumbnail(); representedURL = entry.url
         textField?.stringValue = entry.name; textField?.textColor = entry.isHidden ? .secondaryLabelColor : .labelColor
-        imageView?.image = Thumbnails.shared.icon(entry); imageView?.contentTintColor = entry.isFolder ? .systemBlue : nil
+        imageView?.image = Thumbnails.shared.icon(entry); imageView?.contentTintColor = nil
         view.toolTip = "\(entry.name) · \(entry.kind)\n\(entry.url.path)"
         view.setAccessibilityLabel("\(entry.name), \(entry.kind)")
         view.setAccessibilityIdentifier("file-" + entry.name)
