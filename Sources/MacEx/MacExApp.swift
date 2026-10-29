@@ -37,6 +37,15 @@ import MacExCore
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self; NSWindow.allowsAutomaticWindowTabbing = false
+        // Draw the supplied artwork directly: newer macOS versions otherwise shrink
+        // legacy ICNS artwork into an additional rounded background in the Dock.
+        if let url = Bundle.main.url(forResource: "MacEx", withExtension: "icns"), let image = NSImage(contentsOf: url) {
+            let tile = NSApp.dockTile
+            let artwork = NSImageView(frame: NSRect(origin: .zero, size: tile.size))
+            artwork.image = image; artwork.imageScaling = .scaleProportionallyUpOrDown
+            artwork.autoresizingMask = [.width, .height]
+            tile.contentView = artwork; tile.display()
+        }
         let support = stateURL.deletingLastPathComponent()
         workspace.knownHosts = SSHKnownHosts(url: support.appendingPathComponent("ssh-known-hosts.json"))
         workspace.localIndex.configure(directory: support.appendingPathComponent("LocalIndex")); workspace.localIndex.interaction = workspace.interaction; workspace.localIndex.load()
