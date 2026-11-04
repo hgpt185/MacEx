@@ -82,7 +82,7 @@ struct FileIcons: NSViewRepresentable {
             operation == .on && entries.indices.contains(path.item) && entries[path.item].isFolder ? entries[path.item].url : model.location
         }
         func collectionView(_ collectionView: NSCollectionView, validateDrop info: any NSDraggingInfo, proposedIndexPath path: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation operation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
-            let hit = collectionView.indexPathForItem(at: collectionView.convert(info.draggingLocation, from: nil))
+            let hit = (collectionView as? BrowserCollection)?.pathAt(collectionView.convert(info.draggingLocation, from: nil))
             let folder = hit.flatMap { entries.indices.contains($0.item) && entries[$0.item].isFolder ? entries[$0.item].url : nil }
             if let hit, folder != nil { path.pointee = hit as NSIndexPath; operation.pointee = .on }
             else { operation.pointee = .before }
@@ -184,19 +184,81 @@ struct FileIcons: NSViewRepresentable {
         if !receivedFocus, let window { window.makeFirstResponder(self); receivedFocus = true }
     }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    /// Selection and double-click are resolved on mouse-down. NSCollectionView's own handler runs a drag-tracking
-    /// loop first, which delayed selection and could swallow the second click of a double-click.
+
+    // Mouse handling is owned here instead of NSCollectionView's built-in mouseDown. That handler runs a modal
+    // tracking loop which could swallow the second click of a double-click (so files never opened) and revert
+    // selection on mouse-up. Selection follows Finder: click selects, ⌘ toggles, ⇧ extends, double-click opens.
+    private var pressPoint: NSPoint?
+    private var pressedPath: IndexPath?
+    private var collapseOnMouseUp: IndexPath?
+    private var anchor: IndexPath?
+
+    /// Item under a point, from layout frames. (`indexPathForItem(at:)` hit-tests item views, which are deliberately
+    /// transparent to hit-testing so every click reaches this view; it would always return nil.)
+    func pathAt(_ point: NSPoint) -> IndexPath? {
+        indexPathsForVisibleItems().first { frameForItem(at: $0.item).contains(point) }
+    }
+    private func commit(_ paths: Set<IndexPath>) {
+        guard paths != selectionIndexPaths else { return }
+        selectionIndexPaths = paths
+        delegate?.collectionView?(self, didSelectItemsAt: paths)
+    }
     override func mouseDown(with event: NSEvent) {
-        let path = indexPathForItem(at: convert(event.locationInWindow, from: nil))
-        let plain = event.modifierFlags.intersection([.command, .shift, .control]).isEmpty
-        if event.clickCount == 2, plain, let path, let model, model.entries.indices.contains(path.item) {
-            model.open(model.entries[path.item]); return
+        window?.makeFirstResponder(self)
+        let point = convert(event.locationInWindow, from: nil)
+        let path = pathAt(point)
+        let flags = event.modifierFlags.intersection([.command, .shift, .control])
+        collapseOnMouseUp = nil
+        if flags.contains(.control) { super.mouseDown(with: event); return } // ⌃-click shows the context menu.
+        if event.clickCount >= 2, flags.isEmpty, let path, let model, model.entries.indices.contains(path.item) {
+            commit([path]); model.open(model.entries[path.item]); return
         }
-        if plain, let path, !selectionIndexPaths.contains(path) {
-            selectionIndexPaths = [path]
-            delegate?.collectionView?(self, didSelectItemsAt: [path])
+        guard let path else {
+            if flags.isEmpty { commit([]) }
+            pressPoint = nil; pressedPath = nil; return
         }
-        super.mouseDown(with: event)
+        if flags.contains(.command) {
+            var next = selectionIndexPaths
+            if next.contains(path) { next.remove(path) } else { next.insert(path) }
+            commit(next); anchor = path
+        } else if flags.contains(.shift), let anchor {
+            let range = min(anchor.item, path.item)...max(anchor.item, path.item)
+            commit(Set(range.map { IndexPath(item: $0, section: 0) }))
+        } else if selectionIndexPaths.contains(path) && selectionIndexPaths.count > 1 {
+            collapseOnMouseUp = path // Keep the group so it can be dragged; collapse if this was just a click.
+            anchor = path
+        } else {
+            commit([path]); anchor = path
+        }
+        pressPoint = point; pressedPath = path
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = pressPoint, pressedPath != nil, model?.busy != true else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard hypot(point.x - start.x, point.y - start.y) >= 4 else { return }
+        pressPoint = nil; collapseOnMouseUp = nil
+        beginFileDrag(event)
+    }
+    override func mouseUp(with event: NSEvent) {
+        if let path = collapseOnMouseUp { commit([path]) }
+        collapseOnMouseUp = nil; pressPoint = nil; pressedPath = nil
+    }
+    private func beginFileDrag(_ event: NSEvent) {
+        let paths = selectionIndexPaths.sorted()
+        let items: [NSDraggingItem] = paths.compactMap { path in
+            guard let writer = delegate?.collectionView?(self, pasteboardWriterForItemAt: path) else { return nil }
+            let item = NSDraggingItem(pasteboardWriter: writer)
+            let frame = frameForItem(at: path.item)
+            var image: NSImage?
+            if let view = self.item(at: path)?.view, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                image = NSImage(size: view.bounds.size); image?.addRepresentation(rep)
+            }
+            item.setDraggingFrame(frame, contents: image)
+            return item
+        }
+        guard !items.isEmpty else { return }
+        beginDraggingSession(with: items, event: event, source: self)
     }
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.intersection([.command, .control, .option]) == .command, event.keyCode == 31 || event.keyCode == 125 { model?.openSelection(); return }
@@ -211,7 +273,7 @@ struct FileIcons: NSViewRepresentable {
     override func draggingExited(_ sender: (any NSDraggingInfo)?) { model?.dropHint = nil; super.draggingExited(sender) }
     override func concludeDragOperation(_ sender: (any NSDraggingInfo)?) { model?.dropHint = nil; super.concludeDragOperation(sender) }
     override func menu(for event: NSEvent) -> NSMenu? {
-        if let path = indexPathForItem(at: convert(event.locationInWindow, from: nil)) {
+        if let path = pathAt(convert(event.locationInWindow, from: nil)) {
             if !selectionIndexPaths.contains(path) { selectionIndexPaths = [path] }
         } else { selectionIndexPaths = [] }
         guard let model else { return nil }

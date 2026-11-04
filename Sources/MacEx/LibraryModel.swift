@@ -46,7 +46,7 @@ struct LibrarySettings: Codable {
 
 enum LibraryRoute: Equatable {
     case home, recents, kind(LibraryKind), large, screenshots, sources, source(String), cleanup, duplicates, similar, folder, search, settings, servers, index, trash
-    var title: String { switch self { case .home: "Home"; case .recents: "Recents"; case let .kind(kind): kind.rawValue; case .large: "Large Files"; case .screenshots: "Screenshots"; case .sources: "Downloaded From"; case let .source(name): name; case .cleanup: "Clean Up"; case .duplicates: "Duplicates"; case .similar: "Similar Photos"; case .folder: "Folders"; case .search: "Search"; case .settings: "Settings"; case .servers: "Connections"; case .index: "Text Recognition"; case .trash: "Trash" } }
+    var title: String { switch self { case .home: "Home"; case .recents: "Recents"; case let .kind(kind): kind.rawValue; case .large: "Large Files"; case .screenshots: "Screenshots"; case .sources: "Downloaded From"; case let .source(name): name; case .cleanup: "Free Up Space"; case .duplicates: "Duplicates"; case .similar: "Similar Photos"; case .folder: "Folders"; case .search: "Search"; case .settings: "Settings"; case .servers: "Connections"; case .index: "Text Recognition"; case .trash: "Trash" } }
 }
 
 private struct LibraryNavigationEntry: Equatable {
@@ -207,7 +207,17 @@ final class LibraryModel: ObservableObject {
         return Array(snapshot.items.filter { SearchScope.contains(itemPath: $0.path, scopePath: homeDownloads) }.sorted { ($0.added ?? .distantPast) > ($1.added ?? .distantPast) }.prefix(10))
     }
     var cleanupNames: [String] { ["Forgotten Downloads", "Old Installers", "Old Screenshots", "Big Old Videos", "Unused Apps", "Empty Files"] }
+    /// Memoized per snapshot, age rule and Downloads path; the Free Up Space page reads every category on each render.
+    private var candidateCache: (key: String, value: [String: [LibraryFile]]) = ("", [:])
     func candidates(_ name: String) -> [LibraryFile] {
+        let key = "\(snapshotRevision)|\(settings.ruleDays)|\(settings.downloadsPath)"
+        if candidateCache.key != key { candidateCache = (key, [:]) }
+        if let hit = candidateCache.value[name] { return hit }
+        let value = computeCandidates(name).sorted { $0.bytes > $1.bytes }
+        candidateCache.value[name] = value
+        return value
+    }
+    private func computeCandidates(_ name: String) -> [LibraryFile] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -settings.ruleDays, to: Date()) ?? .distantPast
         let downloads = settings.downloadsPath
         return snapshot.items.filter { item in
@@ -219,6 +229,7 @@ final class LibraryModel: ObservableObject {
             case "Big Old Videos": return item.kind == .videos && item.bytes >= 100_000_000 && item.modified < cutoff
             case "Unused Apps": return item.kind == .apps && (item.lastUsed.map { $0 < cutoff } ?? false) && !item.path.hasPrefix("/System/")
             case "Empty Files": return item.bytes == 0 && !item.package
+            case "Large Files": return item.bytes >= 100_000_000 && !item.package && item.kind != .apps
             default: return false
             }
         }
@@ -546,6 +557,22 @@ final class LibraryModel: ObservableObject {
     }
 
     func seek(_ seconds: Double) { player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) }
+    /// Opens the Trash review for a set of paths picked on Free Up Space. Duplicate groups keep every unselected copy,
+    /// and a group whose copies are all selected is refused so one copy always survives.
+    func reviewCleanup(_ paths: Set<String>) {
+        let byPath = Dictionary(snapshot.items.lazy.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        var retained: [LibraryFile] = []
+        for group in workspace.cleanup.scan?.duplicates ?? [] {
+            let members = group.files.map { SearchScope.canonicalPath($0.url.path) }
+            guard members.contains(where: paths.contains) else { continue }
+            let kept = members.filter { !paths.contains($0) }
+            guard !kept.isEmpty else { status = "Keep at least one copy in each duplicate group."; return }
+            retained += kept.compactMap { byPath[$0] }
+        }
+        let selected = paths.sorted().compactMap { byPath[$0] }
+        guard !selected.isEmpty else { return }
+        prepareTrash(selected, retaining: retained)
+    }
     func prepareTrash(_ values: [LibraryFile], retaining: [LibraryFile] = []) {
         cleanupSelection = Set(values.map(\.path)); reviewItems = values; reviewRetained = retaining; cleanupReview = true
     }
@@ -579,13 +606,37 @@ final class LibraryModel: ObservableObject {
     }
     private func recordTrash(_ summary: JobSummary, action: FileAction?) {
         if action == .trash {
+            // Drop trashed files from the library and every selection right away; the rescan that follows confirms it.
+            let gone = Set(summary.completed.map { SearchScope.canonicalPath($0.source.path) })
+            if !gone.isEmpty {
+                snapshot.items.removeAll { gone.contains($0.path) }
+                cleanupSelection.subtract(gone); selected.subtract(gone)
+                if let preview = previewURL, gone.contains(SearchScope.canonicalPath(preview.path)) { previewURL = nil }
+            }
             for item in summary.completed {
                 guard let destination = item.destination, let identity = try? FileIdentity(destination), !trashHistory.contains(where: { $0.trashPath == destination.path }) else { continue }
                 trashHistory.append(TrashHistoryItem(originalPath: item.source.path, trashPath: destination.path, signature: LibraryFile.restorationSignature(identity)))
             }
         } else if action == .move { let moved = Set(summary.completed.map { $0.source.path }); trashHistory.removeAll { moved.contains($0.trashPath) } }
         trashHistory = Array(trashHistory.suffix(500))
+        saveTrashHistory()
+    }
+    private func saveTrashHistory() {
         do { let url = directory.appendingPathComponent("trash-history.json"); try JSONEncoder().encode(trashHistory).write(to: url, options: .atomic); try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) } catch { status = error.localizedDescription }
+    }
+    /// Removes history entries (for items already emptied from Trash); files themselves are untouched.
+    func forgetTrashHistory(_ items: [TrashHistoryItem]) {
+        let ids = Set(items.map(\.id)); trashHistory.removeAll { ids.contains($0.id) }; saveTrashHistory()
+    }
+    /// Restores items one after another; each restore is its own verified move job.
+    func restoreAll(_ items: [TrashHistoryItem]) {
+        Task { [weak self] in
+            for item in items {
+                while self?.workspace.jobs.busy == true { try? await Task.sleep(for: .milliseconds(100)) }
+                self?.restore(item)
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
     }
     func restore(_ item: TrashHistoryItem) {
         do {

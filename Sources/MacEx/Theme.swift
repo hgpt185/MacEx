@@ -78,3 +78,9 @@ struct ToolbarIconButton: View {
 extension View {
     func hoverLift(_ scale: CGFloat = 1.015) -> some View { modifier(HoverLift(scale: scale)) }
 }
+
+/// Every "open this file" goes through here, so behavior is consistent and tests can observe it without launching apps.
+@MainActor enum FileOpener {
+    static var handler: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    static func open(_ url: URL) { handler(url) }
+}

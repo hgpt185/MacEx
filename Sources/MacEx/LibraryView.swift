@@ -71,7 +71,7 @@ struct SingleWindowView: View {
             }
             .animation(Theme.snappy, value: model.sidebarVisible)
             .animation(Theme.snappy, value: model.previewURL != nil || model.inspector)
-            if browser.showingOperations { operationsOverlay }
+            if browser.showingOperations { operationsOverlay.transition(.move(edge: .top).combined(with: .opacity)) }
             if model.cleanupReview { reviewOverlay }
             InAppInteractionView(model: interaction)
         }.ignoresSafeArea(.container, edges: .top).background(Theme.canvas).tint(accent)
@@ -136,12 +136,8 @@ struct SingleWindowView: View {
                     sectionHeader("Tools", expanded: $toolsExpanded)
                     if toolsExpanded {
                         Group {
-                            nav("Clean Up", "sparkles", .cleanup)
-                            nav("Large Files", "internaldrive", .large)
-                            nav("Duplicates", "square.on.square", .duplicates)
-                            nav("Similar Photos", "rectangle.on.rectangle", .similar)
-                            nav("Screenshots", "viewfinder", .screenshots)
-                            nav("Downloaded From", "arrow.down.circle", .sources)
+                            // One cleanup destination; large files, screenshots, duplicates and similar photos are cards inside it.
+                            sidebarRow("Free Up Space", "sparkles", selected: [.cleanup, .duplicates, .similar, .large, .screenshots].contains(model.route), identifier: "library-sidebar-free-up-space") { model.show(.cleanup) }
                             nav("Connections", "network", .servers)
                         }.transition(.opacity.combined(with: .move(edge: .top)))
                     }
@@ -234,18 +230,19 @@ struct SingleWindowView: View {
         case .home: home
         case .settings: LibrarySettingsView(model: model)
         case .sources: sourcePage
-        case .cleanup: cleanupPage
+        case .cleanup: FreeUpSpaceView(model: model, browser: browser, cleanup: model.workspace.cleanup)
         case .duplicates: duplicatePage
         case .similar: SimilarPhotosView(model: model)
         case .servers: serverPage
         case .index: ScrollView([.horizontal, .vertical]) { LocalIndexSheet(browser: browser, model: model.workspace.localIndex, onClose: { model.show(.home) }) }
         case .folder: folderPage
-        case .trash: trashPage
+        case .trash: TrashPageView(model: model, browser: browser)
         default: filesPage
         }
     }
     private var home: some View {
-        ScrollView {
+        // Empty space clears the recent-file selection.
+        FillingScroll(onEmptyClick: { if !model.selected.isEmpty { model.selected = [] } }) {
             VStack(alignment: .leading, spacing: 28) {
                 HStack {
                     VStack(alignment: .leading, spacing: 8) {
@@ -284,9 +281,9 @@ struct SingleWindowView: View {
                 }
             }.padding(28)
         }
+
     }
     private var greeting: String { let hour = Calendar.current.component(.hour, from: Date()); return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening" }
-    private func color(_ index: Int) -> Color { guard model.settings.playful else { return Color.secondary.opacity(0.10) }; return [Color.purple, .blue, .orange, .teal, .yellow, .pink][index % 6].opacity(0.12) }
     private func folderTone(_ index: Int) -> Color {
         let soft: [UInt32] = [0x6B8AFD, 0x8B7CF6, 0xEE8F62, 0x45B3A3, 0xD9A23E, 0xDC7397]
         let hex = soft[index % soft.count]
@@ -330,18 +327,14 @@ struct SingleWindowView: View {
     private var filesPage: some View {
         VStack(alignment: .leading, spacing: 0) {
             PageHeader(symbol: routeSymbol, title: model.route.title, detail: model.items.count.formatted()) {
+                // Icon-only actions appear with a selection; labels live in tooltips and the right-click menu.
                 if !model.selected.isEmpty {
-                    HeaderButton(title: "Copy Text", symbol: "doc.on.clipboard") { model.copyText() }
-                    HeaderButton(title: "Move to Trash…", symbol: "trash", role: .destructive) { model.prepareTrash(model.snapshot.items.filter { model.selected.contains($0.path) }) }
+                    Text("\(model.selected.count) selected").font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+                        .transition(.opacity)
+                    ToolbarIconButton(symbol: "doc.on.clipboard", help: "Copy Text") { model.copyText() }
+                    ToolbarIconButton(symbol: "trash", help: "Move to Trash…") { model.prepareTrash(model.snapshot.items.filter { model.selected.contains($0.path) }) }
                 }
-                if model.route == .search { HeaderButton(title: "Save Search", symbol: "bookmark") { model.saveSearch() }.disabled(model.searchText.isEmpty) }
-                if !model.sources.isEmpty {
-                    Menu {
-                        Picker("Downloaded from", selection: $model.sourceFilter) { Text("Any source").tag(""); ForEach(model.sources, id: \.0) { Text($0.0).tag($0.0) } }.pickerStyle(.inline)
-                    } label: { Image(systemName: model.sourceFilter.isEmpty ? "globe" : "globe.badge.chevron.backward").font(.system(size: 12, weight: .medium)) }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28)
-                        .help(model.sourceFilter.isEmpty ? "Filter by source" : "From \(model.sourceFilter)")
-                }
+                if model.route == .search { ToolbarIconButton(symbol: "bookmark", help: "Save Search") { model.saveSearch() }.disabled(model.searchText.isEmpty) }
                 viewControls
             }
             if model.route == .search { VStack(alignment: .leading, spacing: 6) { chips; filterEditor }.padding(.horizontal, 24).padding(.bottom, 8) }
@@ -353,24 +346,30 @@ struct SingleWindowView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 LibraryFileBrowser(items: model.items, selection: $model.selected, sortOrder: $model.sortOrder, grid: browser.viewMode == .icons,
-                                   tileSize: model.settings.cardSize, showsSource: !model.sources.isEmpty,
-                                   open: { NSWorkspace.shared.open($0.url) }) { item in itemMenu(item) }
+                                   tileSize: model.settings.cardSize, showsSource: false,
+                                   open: { FileOpener.open($0.url) }) { item in itemMenu(item) }
             }
         }.animation(Theme.gentle, value: browser.viewMode)
     }
-    @ViewBuilder private func itemMenu(_ item: LibraryFile) -> some View {
-        let targets = model.selected.contains(item.path) ? model.selected.map { URL(fileURLWithPath: $0) } : [item.url]
-        Button("Open") { for url in targets.prefix(10) { NSWorkspace.shared.open(url) } }
-        Button("Quick Look") { model.preview(item.url) }
-        Divider()
-        Button("Copy Text") { model.copyText(targets) }
-        Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(targets.map(\.path).joined(separator: "\n"), forType: .string) }
-        Button("Show in Enclosing Folder") { model.openFolder(item.url.deletingLastPathComponent()) }
-        Divider()
-        Button("Copy to Folder…") { model.transfer(targets, move: false) }
-        Button("Move to Folder…") { model.transfer(targets, move: true) }
-        Divider()
-        Button("Move to Trash…", role: .destructive) { model.prepareTrash(model.snapshot.items.filter { item in targets.contains { $0.path == item.path } }) }
+    /// Menu for a file; acts on the whole selection when the file is part of it.
+    private func itemMenu(_ item: LibraryFile) -> [MenuEntry] {
+        let targets = model.selected.contains(item.path) ? model.selected.sorted().map { URL(fileURLWithPath: $0) } : [item.url]
+        let many = targets.count > 1
+        return [
+            MenuEntry(title: many ? "Open \(targets.count) Items" : "Open", symbol: "arrow.up.forward.app") { for url in targets.prefix(10) { FileOpener.open(url) } },
+            MenuEntry(title: "Quick Look", symbol: "eye") { model.preview(item.url) },
+            .separator,
+            MenuEntry(title: "Copy Text", symbol: "doc.on.clipboard") { model.copyText(targets) },
+            MenuEntry(title: many ? "Copy Paths" : "Copy Path", symbol: "link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(targets.map(\.path).joined(separator: "\n"), forType: .string) },
+            MenuEntry(title: "Show in Enclosing Folder", symbol: "folder") { model.openFolder(item.url.deletingLastPathComponent()) },
+            .separator,
+            MenuEntry(title: "Copy to Folder…", symbol: "doc.on.doc") { model.transfer(targets, move: false) },
+            MenuEntry(title: "Move to Folder…", symbol: "folder.badge.plus") { model.transfer(targets, move: true) },
+            .separator,
+            MenuEntry(title: many ? "Move \(targets.count) Items to Trash…" : "Move to Trash…", symbol: "trash", destructive: true) {
+                let paths = Set(targets.map(\.path)); model.prepareTrash(model.snapshot.items.filter { paths.contains($0.path) })
+            },
+        ]
     }
     private var viewControls: some View {
         HStack(spacing: 8) {
@@ -426,36 +425,11 @@ struct SingleWindowView: View {
     private func chip(_ title: String, remove: @escaping () -> Void) -> some View { Button(action: remove) { HStack(spacing: 4) { Text(title); Image(systemName: "xmark").font(.system(size: 8)) }.font(.system(size: 11)).padding(.horizontal, 8).padding(.vertical, 6).background(accent.opacity(0.1), in: Capsule()) }.buttonStyle(.plain) }
     /// Home's recent strips reuse the library tile and the shared click rules.
     private func recentTile(_ item: LibraryFile, in row: [LibraryFile]) -> some View {
-        let clicks = ClickSelection(selection: $model.selected, anchor: $clickAnchor, order: row.map(\.path)) { _ in NSWorkspace.shared.open(item.url) }
+        let clicks = ClickSelection(selection: $model.selected, anchor: $clickAnchor, order: row.map(\.path)) { _ in FileOpener.open(item.url) }
         return LibraryTile(item: item, selected: model.selected.contains(item.path), size: 150)
             .onTapGesture { clicks.click(item.path) }
             .modifier(LibraryDragItem(url: item.url))
-            .contextMenu { itemMenu(item) }
-    }
-    @ViewBuilder private var selectionActions: some View {
-        Button("Open") { for path in model.selected.prefix(10) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } }
-        Button("Quick Look") { if let path = model.selected.first { model.preview(URL(fileURLWithPath: path)) } }
-        Button("Copy Text") { model.copyText() }
-        Button("Copy Files") { copyFiles() }
-        Button("Move to Trash…", role: .destructive) { model.prepareTrash(model.snapshot.items.filter { model.selected.contains($0.path) }) }
-    }
-    private func copyFiles() { NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects(model.selected.map { NSURL(fileURLWithPath: $0) }) }
-    private var trashPage: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PageHeader(symbol: "trash", title: "Trash", detail: model.trashHistory.isEmpty ? nil : model.trashHistory.count.formatted()) {
-                HeaderButton(title: "Browse Trash Folder", symbol: "folder") { model.openFolder(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash")) }
-            }
-            PageNote(text: "Restore files MacEx moved to Trash. Original names and folders are kept in this local history; existing destinations are never overwritten.")
-            if model.trashHistory.isEmpty {
-                ContentUnavailableView("No MacEx Trash history yet", systemImage: "trash", description: Text("Files you move to Trash from MacEx appear here.")).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView { LazyVStack(spacing: 2) { ForEach(model.trashHistory.reversed()) { item in
-                    ToolRow(symbol: "arrow.uturn.backward.circle", title: URL(fileURLWithPath: item.originalPath).lastPathComponent, subtitle: item.originalPath) {
-                        HeaderButton(title: "Restore") { model.restore(item) }.disabled(browser.busy)
-                    }
-                } }.padding(.vertical, 6) }
-            }
-        }
+            .rightClickMenu(select: { if !model.selected.contains(item.path) { model.selected = [item.path] } }, entries: { itemMenu(item) })
     }
     private var folderPage: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -522,55 +496,6 @@ struct SingleWindowView: View {
             }.onTapGesture { model.show(.source(source.0)) }
         }
     }
-    private func cleanupCard(_ name: String, _ index: Int) -> some View {
-        let values = model.candidates(name)
-        return Button { model.cleanupName = name; model.show(.cleanup) } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                Image(systemName: ["arrow.down.circle", "shippingbox", "viewfinder", "play.rectangle"][index % 4]).font(.title2)
-                Text(name).font(.callout.weight(.medium)).lineLimit(2).frame(minHeight: 34, alignment: .topLeading)
-                Text(name == "Unused Apps" ? "\(values.count) candidates" : bytes(values.reduce(0) { $0 + $1.bytes }))
-                    .font(.system(size: 23, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.75)
-                Text("\(values.count) items to review").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }.frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading).padding(18).background(color(index), in: RoundedRectangle(cornerRadius: 15))
-        }.buttonStyle(.plain)
-    }
-    private var cleanupPage: some View {
-        let candidates = sortedForList(model.candidates(model.cleanupName))
-        return VStack(alignment: .leading, spacing: 0) {
-            PageHeader(symbol: "sparkles", title: "Clean Up", detail: "\(candidates.count.formatted()) · \(bytes(candidates.reduce(0) { $0 + $1.bytes }))") {
-                Stepper("Older than \(model.settings.ruleDays) days", value: $model.settings.ruleDays, in: 1...365000).font(.system(size: 12)).fixedSize()
-                    .onChange(of: model.settings.ruleDays) { _, _ in model.save() }
-                HeaderButton(title: "Review All") { model.prepareTrash(candidates) }.disabled(candidates.isEmpty)
-                HeaderButton(title: "Review Selected", role: .destructive) { model.prepareTrash(candidates.filter { model.cleanupSelection.contains($0.path) }) }.disabled(model.cleanupSelection.isEmpty)
-            }
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) { ForEach(model.cleanupNames, id: \.self) { name in
-                    let active = model.cleanupName == name
-                    Button { withAnimation(Theme.snappy) { model.cleanupName = name; model.cleanupSelection = [] } } label: {
-                        Text(name).font(.system(size: 12, weight: active ? .semibold : .regular))
-                            .padding(.horizontal, 11).frame(height: 26)
-                            .background(Capsule().fill(active ? Theme.selection : Theme.hover))
-                            .foregroundStyle(active ? Theme.accent : .primary)
-                    }.buttonStyle(PressableStyle())
-                } }.padding(.horizontal, 22)
-            }.scrollIndicators(.never).padding(.bottom, 8)
-            PageNote(text: "Review before moving anything to Trash. App usage and installer status depend on available metadata; age alone does not make a file safe to remove.")
-            if candidates.isEmpty {
-                ContentUnavailableView("Nothing to review", systemImage: "checkmark.circle", description: Text("No files match “\(model.cleanupName)” right now.")).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                LibraryFileBrowser(items: candidates, selection: $model.cleanupSelection, sortOrder: $model.sortOrder, grid: false, showsSource: false,
-                                   open: { NSWorkspace.shared.open($0.url) }) { item in itemMenu(item) }
-            }
-        }
-    }
-    private func sortedForList(_ values: [LibraryFile]) -> [LibraryFile] {
-        switch model.sortOrder {
-        case "Name": values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        case "Size": values.sorted { $0.bytes > $1.bytes }
-        case "Kind": values.sorted { $0.kind.rawValue == $1.kind.rawValue ? $0.name < $1.name : $0.kind.rawValue < $1.kind.rawValue }
-        default: values.sorted { ($0.added ?? $0.created ?? $0.modified) > ($1.added ?? $1.created ?? $1.modified) }
-        }
-    }
     private var duplicatePage: some View {
         VStack(alignment: .leading, spacing: 0) {
             PageHeader(symbol: "square.on.square", title: "Duplicates") {
@@ -585,11 +510,15 @@ struct SingleWindowView: View {
     private var serverPage: some View {
         VStack(alignment: .leading, spacing: 0) {
             PageHeader(symbol: "network", title: "Connections", detail: model.remote.map { _ in "Connected" }) {
-                HeaderButton(title: "Connect with SFTP…", symbol: "plus") { model.remote?.disconnect(); model.remote?.clearPreview(); model.remote = nil; browser.showConnections = true }.disabled(model.remote?.busy == true)
+                // While connected, this returns to the connection form; otherwise the form below is already the page.
+                if model.remote != nil {
+                    HeaderButton(title: "New Connection", symbol: "plus") { model.remote?.disconnect(); model.remote?.clearPreview(); model.remote = nil }.disabled(model.remote?.busy == true)
+                }
             }
             if let remote = model.remote { RemoteBrowserView(model: remote) }
             else if let known = model.workspace.knownHosts { ScrollView { ConnectionSheet(workspace: model.workspace, knownHosts: known, initial: nil, onClose: { model.show(.home) }).padding(.horizontal, 8) } }
-        }
+            else { ContentUnavailableView("Connections unavailable", systemImage: "network.slash", description: Text("The host-key store could not be opened.")).frame(maxWidth: .infinity, maxHeight: .infinity) }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
     private var musicBar: some View {
         HStack(spacing: 12) {
@@ -602,48 +531,138 @@ struct SingleWindowView: View {
             Button { model.player.pause(); model.musicURL = nil; model.playing = false } label: { Image(systemName: "xmark") }
         }.buttonStyle(.plain).padding(16).background(.regularMaterial)
     }
+    /// File operations float in the corner instead of blocking the window.
     private var operationsOverlay: some View {
-        ZStack { Color.black.opacity(0.2); VStack(alignment: .leading, spacing: 16) {
-            HStack { Text("File Operations").font(.title2).bold(); Spacer(); Button("Close") { browser.showingOperations = false } }
-            if let remote = model.remote, remote.busy { Text(remote.status).font(.callout); Button("Cancel Remote Operation", action: remote.cancel) }
-            if let progress = browser.progress { Text(progress.item); ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total))); Button("Cancel Operation", action: browser.cancelJob) }
-            else if let summary = browser.summary { Text("\(summary.completed.count) completed · \(summary.skipped.count) skipped"); Text((summary.errors + summary.warnings).joined(separator: "\n")).font(.caption).textSelection(.enabled); ForEach(Array(summary.completed.filter { $0.trashedOriginal != nil }.enumerated()), id: \.offset) { _, item in Button("Restore \(item.source.lastPathComponent)") { if let trash = item.trashedOriginal { browser.run(OperationRequest(.move, sources: [trash], destination: item.source.deletingLastPathComponent())) } } } }
-            else { Text("Nothing running.").foregroundStyle(.secondary) }
-        }.padding(26).frame(maxWidth: 550).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)).padding(30) }.ignoresSafeArea()
+        VStack {
+            HStack {
+                Spacer()
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: browser.progress != nil ? "arrow.triangle.2.circlepath" : (browser.summary?.errors.isEmpty == false ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"))
+                            .foregroundStyle(browser.progress != nil ? Theme.accent : (browser.summary?.errors.isEmpty == false ? Color.orange : Color.green))
+                            .symbolEffect(.pulse, isActive: browser.progress != nil)
+                        Text(operationTitle).font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        Button { browser.showingOperations = false } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary) }
+                            .buttonStyle(.plain).help("Hide")
+                    }
+                    if let remote = model.remote, remote.busy {
+                        Text(remote.status).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
+                        HeaderButton(title: "Cancel", role: .destructive, action: remote.cancel)
+                    }
+                    if let progress = browser.progress {
+                        Text(progress.item).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total))).tint(Theme.accent)
+                        HStack { Text("\(progress.completed) of \(progress.total)").font(.system(size: 11)).foregroundStyle(.tertiary).monospacedDigit(); Spacer(); HeaderButton(title: "Cancel", role: .destructive, action: browser.cancelJob) }
+                    } else if let summary = browser.summary {
+                        let problems = summary.errors + summary.warnings
+                        if !problems.isEmpty { Text(problems.prefix(3).joined(separator: "\n")).font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(4) }
+                        let restorable = summary.completed.filter { $0.trashedOriginal != nil }
+                        if !restorable.isEmpty {
+                            HeaderButton(title: "Undo", symbol: "arrow.uturn.backward") {
+                                for item in restorable { if let trash = item.trashedOriginal { browser.run(OperationRequest(.move, sources: [trash], destination: item.source.deletingLastPathComponent())) } }
+                            }
+                        }
+                    } else if model.remote?.busy != true {
+                        Text("Nothing running.").font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(14).frame(width: 320)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.hairline, lineWidth: 1))
+                .shadow(color: .black.opacity(0.25), radius: 16, y: 6)
+            }
+            Spacer()
+        }.padding(.trailing, 18).padding(.top, 58)
+            // A clean finish dismisses itself; errors and running work stay until closed.
+            .task(id: browser.summary?.completed.count ?? -1) {
+                guard browser.progress == nil, model.remote?.busy != true, let summary = browser.summary, summary.errors.isEmpty, summary.warnings.isEmpty else { return }
+                try? await Task.sleep(for: .seconds(4))
+                if browser.progress == nil { withAnimation(Theme.snappy) { browser.showingOperations = false } }
+            }
     }
+    private var operationTitle: String {
+        if let progress = browser.progress { return browser.workspace.jobs.action == .trash ? "Moving to Trash…" : progress.total > 1 ? "Working on \(progress.total) items…" : "Working…" }
+        if model.remote?.busy == true { return "Remote transfer" }
+        guard let summary = browser.summary else { return "File operations" }
+        let count = summary.completed.count
+        if summary.cancelled { return "Stopped after \(count) \(count == 1 ? "item" : "items")" }
+        let verb = browser.workspace.jobs.action == .trash ? "Moved to Trash" : "Done"
+        return "\(verb) · \(count) \(count == 1 ? "item" : "items")" + (summary.skipped.isEmpty ? "" : ", \(summary.skipped.count) skipped")
+    }
+    /// Confirmation sheet for anything headed to Trash: what, how much, and what is kept.
     private var reviewOverlay: some View {
-        ZStack { Color.black.opacity(0.2); VStack(alignment: .leading, spacing: 16) {
-            Text("Review \(model.cleanupSelection.count) files for Trash").font(.title2).bold()
-            Text("Sources are checked again before moving. No file is permanently deleted. Allocated space and actual space recovered can differ.").font(.callout).foregroundStyle(.secondary)
-            ScrollView { VStack(alignment: .leading, spacing: 10) { ForEach(model.reviewItems) { Text($0.path).font(.caption).textSelection(.enabled) } } }.frame(maxHeight: 250)
-            HStack { Button("Back") { model.cleanupReview = false }; Spacer(); Button("Move Reviewed Files to Trash", role: .destructive, action: model.trashReviewed).disabled(browser.busy) }
-        }.padding(26).frame(maxWidth: 650).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)).padding(30) }.ignoresSafeArea()
+        let items = model.reviewItems
+        let total = items.reduce(Int64(0)) { $0 + $1.bytes }
+        return ZStack {
+            Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { model.cleanupReview = false }
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 14) {
+                    Image(systemName: "trash.fill").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
+                        .frame(width: 42, height: 42).background(Circle().fill(Color.red.gradient))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Move \(items.count.formatted()) \(items.count == 1 ? "item" : "items") to Trash?").font(.system(size: 16, weight: .semibold))
+                        Text("\(bytes(total)) · each file is checked again before it moves").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }.padding(20)
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(items) { item in
+                            HStack(spacing: 10) {
+                                Image(nsImage: RowIcons.icon(for: item)).resizable().frame(width: 22, height: 22)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(item.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                                    Text(item.url.deletingLastPathComponent().path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                                        .font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                                }
+                                Spacer(minLength: 8)
+                                Text(item.package ? "—" : bytes(item.bytes)).font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
+                            }.padding(.horizontal, 20).frame(height: 40)
+                        }
+                    }.padding(.vertical, 6)
+                }.frame(height: min(CGFloat(items.count) * 41 + 12, 320))
+                if !model.reviewRetained.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.shield.fill").foregroundStyle(.green)
+                        Text("Keeping \(model.reviewRetained.count) \(model.reviewRetained.count == 1 ? "copy" : "copies") so every duplicate group survives.")
+                    }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.vertical, 8)
+                }
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.uturn.backward.circle").foregroundStyle(.secondary)
+                    Text("Nothing is deleted permanently. Restore from Trash in the sidebar.").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel") { model.cleanupReview = false }.keyboardShortcut(.cancelAction)
+                        .buttonStyle(.plain).font(.system(size: 13, weight: .medium)).padding(.horizontal, 12).frame(height: 32)
+                        .background(Capsule().fill(Theme.hover))
+                    Button { model.trashReviewed() } label: {
+                        Text("Move to Trash").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 16).frame(height: 32).background(Capsule().fill(Color.red.gradient))
+                    }.buttonStyle(PressableStyle()).keyboardShortcut(.defaultAction).disabled(browser.busy || items.isEmpty)
+                }.padding(16)
+            }
+            .frame(width: 560)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.elevated))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.hairline, lineWidth: 1))
+            .shadow(color: .black.opacity(0.35), radius: 30, y: 12)
+            .transition(.scale(scale: 0.96).combined(with: .opacity))
+        }
     }
     private func bytes(_ value: Int64) -> String { ByteCountFormatter.string(fromByteCount: value, countStyle: .file) }
 }
 
+/// Per-item file drag. The macOS 26 drag-container APIs were removed here: they took over mouse handling, so
+/// taps on tiles and on empty space were swallowed or reinterpreted.
 struct LibraryDragItem: ViewModifier {
     let url: URL
-    @ViewBuilder func body(content: Content) -> some View {
-        #if compiler(>=6.4)
-        if #available(macOS 26, *) { content.draggable(containerItemID: url) }
-        else { content.onDrag { NSItemProvider(object: url as NSURL) } }
-        #else
-        content.onDrag { NSItemProvider(object: url as NSURL) }
-        #endif
-    }
+    func body(content: Content) -> some View { content.onDrag { NSItemProvider(object: url as NSURL) } }
 }
+/// Kept as a no-op so call sites stay simple; see `LibraryDragItem`.
 struct LibraryDragContainer: ViewModifier {
     let urls: [URL]
-    @ViewBuilder func body(content: Content) -> some View {
-        #if compiler(>=6.4)
-        if #available(macOS 26, *) {
-            content.dragContainer(for: URL.self, itemID: \.self) { (ids: [URL]) in ids }.dragContainerSelection(urls)
-        } else { content }
-        #else
-        content
-        #endif
-    }
+    func body(content: Content) -> some View { content }
 }
 
 /// Sidebar row with hover plate and animated selection.

@@ -186,7 +186,7 @@ import MacExCore
     @objc func openMain() { show() }
     @objc func openSelection() {
         if library?.route == .folder || library?.route == .trash { browser?.openSelection() }
-        else if let library { for path in library.selected.prefix(10) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } }
+        else if let library { for path in library.selected.prefix(10) { FileOpener.open(URL(fileURLWithPath: path)) } }
     }
     @objc func home() { show(); library?.show(.home) }
     @objc func settings() { show(); library?.show(.settings) }

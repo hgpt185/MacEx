@@ -235,7 +235,7 @@ final class BrowserModel: ObservableObject {
             let values = try target.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
             if values.isDirectory == true && values.isPackage != true { navigate(target); return }
             selection = [target]
-            NSWorkspace.shared.open(target)
+            FileOpener.open(target)
         } catch { errorMessage = "Cannot open \(entry.name): \(error.localizedDescription)" }
     }
     /// Shows the file in MacEx's own preview pane instead of handing it to another app.

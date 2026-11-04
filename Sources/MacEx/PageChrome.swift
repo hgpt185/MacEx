@@ -95,10 +95,17 @@ struct HeaderButton: View {
     @Binding var anchor: String?
     let order: [String]
     let open: (String) -> Void
+    /// Double-clicks are detected from timing and target, not `NSApp.currentEvent`, which SwiftUI tap handlers may not see.
+    private static var lastClick: (id: String, time: TimeInterval)?
+    static func isDoubleClick(_ id: String) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        if let last = lastClick, last.id == id, now - last.time <= NSEvent.doubleClickInterval { lastClick = nil; return true }
+        lastClick = (id, now); return false
+    }
     func click(_ id: String) {
-        let event = NSApp.currentEvent
-        if (event?.clickCount ?? 1) >= 2 { selection = [id]; anchor = id; open(id); return }
-        let flags = event?.modifierFlags ?? []
+        TapLedger.mark()
+        if Self.isDoubleClick(id) { selection = [id]; anchor = id; open(id); return }
+        let flags = NSEvent.modifierFlags
         if flags.contains(.command) {
             if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
             anchor = id
@@ -127,7 +134,7 @@ struct ListColumnHeader: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
     }
     private func column(_ title: String, key: String) -> some View {
-        Button { withAnimation(Theme.gentle) { sortOrder = key } } label: {
+        Button { TapLedger.mark(); withAnimation(Theme.gentle) { sortOrder = key } } label: {
             HStack(spacing: 4) {
                 Text(title)
                 if sortOrder == key { Image(systemName: key == "Name" || key == "Kind" ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .bold)) }
@@ -194,7 +201,7 @@ struct LibraryTile: View {
 }
 
 /// The library's file list and grid with folder-page behavior.
-struct LibraryFileBrowser<Menu: View>: View {
+struct LibraryFileBrowser: View {
     let items: [LibraryFile]
     @Binding var selection: Set<String>
     @Binding var sortOrder: String
@@ -202,34 +209,42 @@ struct LibraryFileBrowser<Menu: View>: View {
     var tileSize: CGFloat = 150
     var showsSource = true
     let open: (LibraryFile) -> Void
-    @ViewBuilder let menu: (LibraryFile) -> Menu
+    let menu: (LibraryFile) -> [MenuEntry]
     @State private var anchor: String?
+    /// Right-clicking an unselected file selects just that file (Finder behavior); inside a selection, the selection stays.
+    private func clearSelection() {
+        guard !selection.isEmpty, NSApp.currentEvent?.modifierFlags.intersection([.command, .shift]).isEmpty != false else { return }
+        selection = []
+    }
+    private func selectForMenu(_ item: LibraryFile) {
+        if !selection.contains(item.path) { selection = [item.path]; anchor = item.path }
+    }
     var body: some View {
         let clicks = ClickSelection(selection: $selection, anchor: $anchor, order: items.map(\.path)) { path in
             if let item = items.first(where: { $0.path == path }) { open(item) }
         }
         Group {
             if grid {
-                ScrollView {
+                FillingScroll(onEmptyClick: clearSelection) {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: tileSize, maximum: tileSize + 40), spacing: 12)], spacing: 14) {
                         ForEach(items) { item in
                             LibraryTile(item: item, selected: selection.contains(item.path), size: tileSize)
                                 .onTapGesture { clicks.click(item.path) }
                                 .modifier(LibraryDragItem(url: item.url))
-                                .contextMenu { menu(item) }
+                                .rightClickMenu(select: { selectForMenu(item) }, entries: { menu(item) })
                         }
                     }.padding(.horizontal, 20).padding(.vertical, 14)
                 }
             } else {
                 // The header is pinned inside the scroll view so its columns share the rows' width (scrollbar included).
-                ScrollView {
+                FillingScroll(onEmptyClick: clearSelection) {
                     LazyVStack(spacing: 2, pinnedViews: [.sectionHeaders]) {
                         Section {
                             ForEach(items) { item in
                                 LibraryFileRow(item: item, selected: selection.contains(item.path), showsSource: showsSource)
                                     .onTapGesture { clicks.click(item.path) }
                                     .modifier(LibraryDragItem(url: item.url))
-                                    .contextMenu { menu(item) }
+                                    .rightClickMenu(select: { selectForMenu(item) }, entries: { menu(item) })
                             }
                         } header: {
                             ListColumnHeader(sortOrder: $sortOrder, showsSource: showsSource).background(Theme.canvas).padding(.bottom, 4)
@@ -267,4 +282,130 @@ struct ToolRow<Trailing: View>: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }.animation(Theme.gentle, value: hovering)
     }
+}
+
+// MARK: Right-click menus that select first
+
+/// A context-menu entry. Built at the moment the menu opens, after the clicked item has been selected.
+struct MenuEntry {
+    var title: String
+    var symbol: String? = nil
+    var destructive = false
+    var enabled = true
+    var action: () -> Void = {}
+    static var separator: MenuEntry { MenuEntry(title: "") }
+    var isSeparator: Bool { title.isEmpty }
+}
+
+extension View {
+    /// Right-click (or ⌃-click) first runs `select`, so the highlighted file always matches the menu, then shows the menu.
+    func rightClickMenu(select: @escaping () -> Void, entries: @escaping () -> [MenuEntry]) -> some View {
+        overlay(RightClickCatcher(select: select, entries: entries))
+    }
+}
+
+private struct RightClickCatcher: NSViewRepresentable {
+    let select: () -> Void
+    let entries: () -> [MenuEntry]
+    func makeNSView(context: Context) -> CatcherView { CatcherView() }
+    func updateNSView(_ view: CatcherView, context: Context) { view.select = select; view.entries = entries }
+
+    final class CatcherView: NSView {
+        var select: (() -> Void)?
+        var entries: (() -> [MenuEntry])?
+        private var targets: [MenuTarget] = []
+        /// Transparent to everything except secondary clicks, so left clicks, hover and drags reach SwiftUI.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let event = NSApp.currentEvent else { return nil }
+            let secondary = event.type == .rightMouseDown || event.type == .rightMouseUp
+                || (event.type == .leftMouseDown && event.modifierFlags.contains(.control))
+            return secondary ? super.hitTest(point) : nil
+        }
+        override func mouseDown(with event: NSEvent) {
+            if event.modifierFlags.contains(.control), let menu = menu(for: event) { NSMenu.popUpContextMenu(menu, with: event, for: self) }
+            else { super.mouseDown(with: event) }
+        }
+        override func menu(for event: NSEvent) -> NSMenu? {
+            select?()
+            let menu = NSMenu(); menu.autoenablesItems = false; targets = []
+            for entry in entries?() ?? [] {
+                if entry.isSeparator { if menu.items.last.map({ !$0.isSeparatorItem }) == true { menu.addItem(.separator()) }; continue }
+                let target = MenuTarget(entry.action); targets.append(target)
+                let item = NSMenuItem(title: entry.title, action: #selector(MenuTarget.run), keyEquivalent: "")
+                item.target = target; item.isEnabled = entry.enabled
+                if let symbol = entry.symbol { item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
+                if entry.destructive { item.attributedTitle = NSAttributedString(string: entry.title, attributes: [.foregroundColor: NSColor.systemRed]) }
+                menu.addItem(item)
+            }
+            if menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
+            return menu.items.isEmpty ? nil : menu
+        }
+    }
+    @MainActor final class MenuTarget: NSObject {
+        let action: () -> Void
+        init(_ action: @escaping () -> Void) { self.action = action }
+        @objc func run() { action() }
+    }
+}
+
+/// Vertical scroll view whose content always fills the viewport, so clicks on empty space below the last
+/// row or tile land on a background that can clear the selection.
+struct FillingScroll<Content: View>: View {
+    let onEmptyClick: () -> Void
+    @ViewBuilder var content: Content
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                content.frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
+            }
+            .background(EmptyClickWatcher(action: onEmptyClick))
+        }
+    }
+}
+
+/// Records which mouse-up a row, tile or header already handled, so a click nobody claimed can be treated as
+/// "empty space". (SwiftUI's ScrollView does not deliver taps from its empty area to gestures.)
+@MainActor enum TapLedger {
+    /// Bumped by every row/tile/header tap. (`NSApp.currentEvent` is not reliable inside SwiftUI tap handlers.)
+    private(set) static var count = 0
+    static func mark() { count &+= 1 }
+}
+
+/// Passive watcher: it never takes hits, so rows, tiles, drags and menus behave normally. After a plain click inside
+/// its area finishes without any row or tile claiming it, it reports an empty-space click.
+private struct EmptyClickWatcher: NSViewRepresentable {
+    let action: () -> Void
+    func makeNSView(context: Context) -> EmptyClickWatcherView { EmptyClickWatcherView() }
+    func updateNSView(_ view: EmptyClickWatcherView, context: Context) { view.action = action }
+}
+final class EmptyClickWatcherView: NSView {
+    var action: (() -> Void)?
+    private var monitor: Any?
+    private var down: NSPoint?
+    private var ledgerAtDown = 0
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        guard window != nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+            self?.observe(event); return event
+        }
+    }
+    func observe(_ event: NSEvent) {
+        guard event.window === window, !isHiddenOrHasHiddenAncestor else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        if event.type == .leftMouseDown {
+            down = visibleRect.contains(point) && event.modifierFlags.intersection([.command, .shift, .control]).isEmpty ? point : nil
+            ledgerAtDown = TapLedger.count
+            return
+        }
+        guard let start = down else { return }
+        down = nil
+        guard hypot(point.x - start.x, point.y - start.y) < 4 else { return } // A drag, not a click.
+        let before = ledgerAtDown
+        // Let SwiftUI deliver its tap first; if no row or tile claimed this click, it hit empty space.
+        DispatchQueue.main.async { [weak self] in if TapLedger.count == before { self?.action?() } }
+    }
+    // The monitor is removed when the view leaves its window (viewDidMoveToWindow with a nil window).
 }

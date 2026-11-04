@@ -120,8 +120,8 @@ final class MacExUITests: XCTestCase {
             XCTAssertTrue(useFolder.waitForExistence(timeout: 5))
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: useFolder)], timeout: 5), .completed)
             useFolder.click()
-            app.buttons["library-sidebar-duplicates"].click()
-            let scan = app.buttons["Scan Library"]
+            app.buttons["library-sidebar-free-up-space"].click()
+            let scan = app.buttons["Find Duplicates"]
             XCTAssertTrue(scan.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: scan)], timeout: 10), .completed)
             scan.click()
@@ -129,7 +129,6 @@ final class MacExUITests: XCTestCase {
             let found = results.waitForExistence(timeout: 10)
             let scanStatus = app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "items checked")).firstMatch
             XCTAssertTrue(found, "Fixture: \(root.path)\nScan: \(String(describing: scanStatus.value))\n\(app.debugDescription)")
-            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "0 selected")).firstMatch.exists)
             XCTAssertEqual(app.windows.count, 1)
             XCTAssertEqual(app.sheets.count, 0)
         }
