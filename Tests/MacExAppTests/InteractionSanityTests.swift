@@ -201,7 +201,6 @@ import MacExCore
         #expect(h.library.selected.count == 1)
         // Empty area well below the tiles.
         let empty = NSPoint(x: center.x, y: center.y - 220)
-        print("PROBE hit", h.window.contentView!.hitTest(h.window.contentView!.convert(empty, from: nil)).map { String(describing: type(of: $0)) } ?? "nil", "frame", h.window.contentView!.frame, "tile", center)
         // window.sendEvent bypasses local monitors, so feed the watcher the empty-space click as the app's monitor would.
         let watcher = try #require(h.find(EmptyClickWatcherView.self))
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
@@ -209,5 +208,70 @@ import MacExCore
         }
         try await h.settle(200)
         #expect(h.library.selected.isEmpty)
+    }
+
+    @Test func iconViewRubberBandSelectsTouchedItems() async throws {
+        let h = try await Harness(viewMode: .icons)
+        defer { h.close() }
+        let grid = try #require(h.find(BrowserCollection.self))
+        let first = grid.frameForItem(at: 0), second = grid.frameForItem(at: 1)
+        let start = NSPoint(x: first.minX - 4, y: first.maxY + 30) // empty space below the first row (flipped view)
+        let end = NSPoint(x: second.midX, y: second.midY)
+        grid.mouseDown(with: h.event(.leftMouseDown, at: start, in: grid))
+        #expect(h.browser.selection.isEmpty)
+        grid.mouseDragged(with: h.event(.leftMouseDragged, at: end, in: grid))
+        grid.mouseUp(with: h.event(.leftMouseUp, at: end, in: grid))
+        #expect(h.selectedNames == Set([h.browser.entries[0].name, h.browser.entries[1].name]))
+        // ⌘-drag over the first item toggles it off, keeping the second.
+        let firstCenter = NSPoint(x: first.midX, y: first.midY)
+        grid.mouseDown(with: h.event(.leftMouseDown, at: start, in: grid, flags: .command))
+        grid.mouseDragged(with: h.event(.leftMouseDragged, at: firstCenter, in: grid, flags: .command))
+        grid.mouseUp(with: h.event(.leftMouseUp, at: firstCenter, in: grid, flags: .command))
+        #expect(h.selectedNames == [h.browser.entries[1].name])
+    }
+
+    @Test func listViewRubberBandFromEmptySpaceAndOtherColumns() async throws {
+        let h = try await Harness(viewMode: .list)
+        defer { h.close() }
+        let table = try #require(h.find(BrowserTable.self))
+        let last = table.rect(ofRow: table.numberOfRows - 1), second = table.rect(ofRow: 1)
+        let start = NSPoint(x: 60, y: last.maxY + 40) // below the last row
+        let end = NSPoint(x: 60, y: second.midY)
+        table.mouseDown(with: h.event(.leftMouseDown, at: start, in: table))
+        table.mouseDragged(with: h.event(.leftMouseDragged, at: end, in: table))
+        table.mouseUp(with: h.event(.leftMouseUp, at: end, in: table))
+        #expect(h.browser.selection.count == table.numberOfRows - 1)
+        // A plain click on the Date column selects just that row (and can start a rubber band).
+        let dateColumn = table.column(withIdentifier: NSUserInterfaceItemIdentifier("modified"))
+        let cell = table.frameOfCell(atColumn: dateColumn, row: 2)
+        table.mouseDown(with: h.event(.leftMouseDown, at: NSPoint(x: cell.midX, y: cell.midY), in: table))
+        table.mouseUp(with: h.event(.leftMouseUp, at: NSPoint(x: cell.midX, y: cell.midY), in: table))
+        #expect(h.selectedNames == [h.browser.entries[2].name])
+    }
+
+    @Test func libraryGridRubberBandSelectsTiles() async throws {
+        let h = try await Harness(viewMode: .icons)
+        defer { h.close() }
+        h.library.snapshot = LibraryScanner.scan(roots: [h.root.appendingPathComponent("Files")])
+        h.library.show(.kind(.documents))
+        try await h.settle(900)
+        let watcher = try #require(h.find(EmptyClickWatcherView.self))
+        // Top row, left to right (window coordinates have y increasing upward).
+        let frames = h.findAll(named: "CatcherView").map { $0.convert($0.bounds, to: nil) }
+        let topY = frames.map(\.maxY).max() ?? 0
+        let tiles = frames.filter { abs($0.maxY - topY) < 1 }.sorted { $0.minX < $1.minX }
+        #expect(tiles.count >= 2)
+        // Drag from the empty gutter left of the first tile to the middle of the second.
+        let start = NSPoint(x: tiles[0].minX - 6, y: tiles[0].midY)
+        let end = NSPoint(x: tiles[1].midX, y: tiles[1].midY)
+        func send(_ type: NSEvent.EventType, _ point: NSPoint) {
+            watcher.observe(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: h.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+        }
+        send(.leftMouseDown, start); send(.leftMouseDragged, end)
+        try await h.settle(150)
+        #expect(h.library.selected.count == 2)
+        send(.leftMouseUp, end)
+        try await h.settle(200)
+        #expect(h.library.selected.count == 2) // Ending the band must not count as an empty-space click.
     }
 }

@@ -202,12 +202,52 @@ struct FileTable: NSViewRepresentable {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     /// Double-clicks are handled on mouse-down, before NSTableView's drag-tracking loop can consume the event.
     override func mouseDown(with event: NSEvent) {
-        let row = row(at: convert(event.locationInWindow, from: nil))
-        if event.clickCount == 2, row >= 0, let model, let coordinator, coordinator.entries.indices.contains(row),
-           event.modifierFlags.intersection([.command, .shift, .control]).isEmpty {
+        let point = convert(event.locationInWindow, from: nil)
+        let row = row(at: point)
+        let flags = event.modifierFlags.intersection([.command, .shift, .control])
+        if event.clickCount == 2, row >= 0, let model, let coordinator, coordinator.entries.indices.contains(row), flags.isEmpty {
             model.open(coordinator.entries[row]); return
         }
+        // Like Finder, the name drags the file; empty space below the rows and the other columns start a
+        // rubber-band selection instead (a plain click there still selects that row).
+        let column = column(at: point)
+        let onName = row >= 0 && column >= 0 && tableColumns[column].identifier.rawValue == "name"
+        if !onName && !flags.contains(.control) && !(row >= 0 && !flags.isEmpty) {
+            window?.makeFirstResponder(self)
+            if flags.isEmpty {
+                if row >= 0 { selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) } else { deselectAll(nil) }
+            }
+            marqueeStart = point
+            marqueeBase = flags.isEmpty ? [] : selectedRowIndexes
+            marqueeToggles = flags.contains(.command)
+            return
+        }
         super.mouseDown(with: event)
+    }
+    private var marqueeStart: NSPoint?
+    private var marqueeBase = IndexSet()
+    private var marqueeToggles = false
+    private var marqueeView: MarqueeView?
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = marqueeStart else { super.mouseDragged(with: event); return }
+        autoscroll(with: event)
+        updateMarquee(from: start, to: convert(event.locationInWindow, from: nil))
+    }
+    override func mouseUp(with event: NSEvent) {
+        guard marqueeStart != nil else { super.mouseUp(with: event); return }
+        marqueeView?.removeFromSuperview(); marqueeView = nil; marqueeStart = nil
+    }
+    func updateMarquee(from start: NSPoint, to point: NSPoint) {
+        let rect = MarqueeView.rect(start, point)
+        guard marqueeView != nil || hypot(point.x - start.x, point.y - start.y) >= 3 else { return }
+        if marqueeView == nil { let view = MarqueeView(frame: rect); addSubview(view); marqueeView = view }
+        marqueeView?.frame = rect
+        // Rows span the full width, so only the band's vertical extent matters (a straight vertical drag has zero width).
+        let range = rows(in: NSRect(x: bounds.minX, y: rect.minY, width: bounds.width, height: max(rect.height, 1)))
+        let hits = range.length > 0 ? IndexSet(integersIn: range.location..<(range.location + range.length)) : IndexSet()
+        var next = marqueeToggles ? marqueeBase.symmetricDifference(hits) : marqueeBase.union(hits)
+        next = next.filteredIndexSet { $0 < numberOfRows }
+        if next != selectedRowIndexes { selectRowIndexes(next, byExtendingSelection: false) }
     }
     override func keyDown(with event: NSEvent) {
         // ⌘O and ⌘↓ open, matching Finder.

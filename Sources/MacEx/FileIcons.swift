@@ -214,8 +214,11 @@ struct FileIcons: NSViewRepresentable {
             commit([path]); model.open(model.entries[path.item]); return
         }
         guard let path else {
+            // Empty space: clear (unless ⌘/⇧) and get ready for a rubber-band selection.
             if flags.isEmpty { commit([]) }
-            pressPoint = nil; pressedPath = nil; return
+            pressPoint = nil; pressedPath = nil
+            marqueeStart = point; marqueeBase = flags.isEmpty ? [] : selectionIndexPaths; marqueeToggles = flags.contains(.command)
+            return
         }
         if flags.contains(.command) {
             var next = selectionIndexPaths
@@ -233,6 +236,11 @@ struct FileIcons: NSViewRepresentable {
         pressPoint = point; pressedPath = path
     }
     override func mouseDragged(with event: NSEvent) {
+        if let start = marqueeStart {
+            autoscroll(with: event)
+            updateMarquee(from: start, to: convert(event.locationInWindow, from: nil))
+            return
+        }
         guard let start = pressPoint, pressedPath != nil, model?.busy != true else { return }
         let point = convert(event.locationInWindow, from: nil)
         guard hypot(point.x - start.x, point.y - start.y) >= 4 else { return }
@@ -240,8 +248,29 @@ struct FileIcons: NSViewRepresentable {
         beginFileDrag(event)
     }
     override func mouseUp(with event: NSEvent) {
+        if marqueeStart != nil { endMarquee() }
         if let path = collapseOnMouseUp { commit([path]) }
         collapseOnMouseUp = nil; pressPoint = nil; pressedPath = nil
+    }
+    // Rubber-band selection: dragging from empty space selects every item the rectangle touches.
+    // ⌘ toggles items against the existing selection, ⇧ adds to it.
+    private var marqueeStart: NSPoint?
+    private var marqueeBase: Set<IndexPath> = []
+    private var marqueeToggles = false
+    private var marqueeView: MarqueeView?
+    func updateMarquee(from start: NSPoint, to point: NSPoint) {
+        let rect = MarqueeView.rect(start, point)
+        guard marqueeView != nil || hypot(point.x - start.x, point.y - start.y) >= 3 else { return }
+        if marqueeView == nil { let view = MarqueeView(frame: rect); addSubview(view); marqueeView = view }
+        marqueeView?.frame = rect
+        let hits = Set((collectionViewLayout?.layoutAttributesForElements(in: rect) ?? [])
+            .filter { $0.representedElementCategory == .item && $0.frame.intersects(rect) }
+            .compactMap(\.indexPath))
+        commit(marqueeToggles ? marqueeBase.symmetricDifference(hits) : marqueeBase.union(hits))
+    }
+    func endMarquee() {
+        marqueeView?.removeFromSuperview(); marqueeView = nil; marqueeStart = nil
+        if let last = selectionIndexPaths.max() { anchor = last }
     }
     private func beginFileDrag(_ event: NSEvent) {
         let paths = selectionIndexPaths.sorted()

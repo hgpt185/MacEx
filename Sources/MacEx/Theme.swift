@@ -84,3 +84,26 @@ extension View {
     static var handler: (URL) -> Void = { NSWorkspace.shared.open($0) }
     static func open(_ url: URL) { handler(url) }
 }
+
+/// Finder-style selection rectangle drawn while rubber-band selecting. Never takes clicks.
+@MainActor final class MarqueeView: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 3
+        layer?.borderWidth = 1
+        updateColors()
+    }
+    required init?(coder: NSCoder) { nil }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); updateColors() }
+    private func updateColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Theme.accentNS.withAlphaComponent(0.15).cgColor
+            layer?.borderColor = Theme.accentNS.withAlphaComponent(0.7).cgColor
+        }
+    }
+    static func rect(_ a: NSPoint, _ b: NSPoint) -> NSRect {
+        NSRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
+    }
+}

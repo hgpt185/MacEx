@@ -211,6 +211,20 @@ struct LibraryFileBrowser: View {
     let open: (LibraryFile) -> Void
     let menu: (LibraryFile) -> [MenuEntry]
     @State private var anchor: String?
+    @State private var frames: [String: CGRect] = [:]
+    @State private var marqueeRect: CGRect?
+    @State private var marqueeBase: Set<String>?
+    private var marquee: Marquee {
+        Marquee(rect: marqueeRect, isOnItem: { point in frames.values.contains { $0.contains(point) } }) { rect, flags in
+            guard let rect else { marqueeRect = nil; marqueeBase = nil; return }
+            if marqueeBase == nil { marqueeBase = flags.isEmpty ? [] : selection }
+            let hits = Set(frames.filter { $0.value.intersects(rect) }.keys)
+            let base = marqueeBase ?? []
+            let next = flags.contains(.command) ? base.symmetricDifference(hits) : base.union(hits)
+            if next != selection { selection = next }
+            marqueeRect = rect
+        }
+    }
     /// Right-clicking an unselected file selects just that file (Finder behavior); inside a selection, the selection stays.
     private func clearSelection() {
         guard !selection.isEmpty, NSApp.currentEvent?.modifierFlags.intersection([.command, .shift]).isEmpty != false else { return }
@@ -225,10 +239,11 @@ struct LibraryFileBrowser: View {
         }
         Group {
             if grid {
-                FillingScroll(onEmptyClick: clearSelection) {
+                FillingScroll(onEmptyClick: clearSelection, marquee: marquee) {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: tileSize, maximum: tileSize + 40), spacing: 12)], spacing: 14) {
                         ForEach(items) { item in
                             LibraryTile(item: item, selected: selection.contains(item.path), size: tileSize)
+                                .marqueeItem(item.path)
                                 .onTapGesture { clicks.click(item.path) }
                                 .modifier(LibraryDragItem(url: item.url))
                                 .rightClickMenu(select: { selectForMenu(item) }, entries: { menu(item) })
@@ -237,11 +252,12 @@ struct LibraryFileBrowser: View {
                 }
             } else {
                 // The header is pinned inside the scroll view so its columns share the rows' width (scrollbar included).
-                FillingScroll(onEmptyClick: clearSelection) {
+                FillingScroll(onEmptyClick: clearSelection, marquee: marquee) {
                     LazyVStack(spacing: 2, pinnedViews: [.sectionHeaders]) {
                         Section {
                             ForEach(items) { item in
                                 LibraryFileRow(item: item, selected: selection.contains(item.path), showsSource: showsSource)
+                                    .marqueeItem(item.path)
                                     .onTapGesture { clicks.click(item.path) }
                                     .modifier(LibraryDragItem(url: item.url))
                                     .rightClickMenu(select: { selectForMenu(item) }, entries: { menu(item) })
@@ -254,7 +270,7 @@ struct LibraryFileBrowser: View {
             }
         }
         .background(Theme.canvas)
-        .modifier(LibraryDragContainer(urls: selection.map { URL(fileURLWithPath: $0) }))
+        .onPreferenceChange(ItemFramesKey.self) { frames = $0 }
         .transition(.opacity)
     }
 }
@@ -352,14 +368,46 @@ private struct RightClickCatcher: NSViewRepresentable {
 /// row or tile land on a background that can clear the selection.
 struct FillingScroll<Content: View>: View {
     let onEmptyClick: () -> Void
+    /// Optional rubber-band selection; see `Marquee`.
+    var marquee: Marquee? = nil
     @ViewBuilder var content: Content
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
                 content.frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
             }
-            .background(EmptyClickWatcher(action: onEmptyClick))
+            .coordinateSpace(name: Marquee.space)
+            .background(EmptyClickWatcher(action: onEmptyClick, marquee: marquee))
+            .overlay(alignment: .topLeading) {
+                if let rect = marquee?.rect {
+                    RoundedRectangle(cornerRadius: 3).fill(Theme.accent.opacity(0.15))
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Theme.accent.opacity(0.7), lineWidth: 1))
+                        .frame(width: rect.width, height: rect.height).offset(x: rect.minX, y: rect.minY)
+                        .allowsHitTesting(false)
+                }
+            }
         }
+    }
+}
+
+/// Rubber-band selection for SwiftUI lists and grids. Items report their frames (in `Marquee.space`, i.e. the
+/// scroll view's visible area); a drag that starts away from every item draws a rectangle and selects what it touches.
+struct Marquee {
+    static let space = "macex-marquee"
+    var rect: CGRect?
+    let isOnItem: (CGPoint) -> Bool
+    /// Called with the current rectangle and the modifiers held at the start; nil when the drag ends.
+    let update: (CGRect?, NSEvent.ModifierFlags) -> Void
+}
+
+struct ItemFramesKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { $1 }) }
+}
+extension View {
+    /// Reports this item's frame for rubber-band selection.
+    func marqueeItem(_ id: String) -> some View {
+        background(GeometryReader { geometry in Color.clear.preference(key: ItemFramesKey.self, value: [id: geometry.frame(in: .named(Marquee.space))]) })
     }
 }
 
@@ -375,11 +423,21 @@ struct FillingScroll<Content: View>: View {
 /// its area finishes without any row or tile claiming it, it reports an empty-space click.
 private struct EmptyClickWatcher: NSViewRepresentable {
     let action: () -> Void
+    var marquee: Marquee?
     func makeNSView(context: Context) -> EmptyClickWatcherView { EmptyClickWatcherView() }
-    func updateNSView(_ view: EmptyClickWatcherView, context: Context) { view.action = action }
+    func updateNSView(_ view: EmptyClickWatcherView, context: Context) {
+        view.action = action; view.isOnItem = marquee?.isOnItem; view.onMarquee = marquee?.update
+    }
 }
 final class EmptyClickWatcherView: NSView {
     var action: (() -> Void)?
+    var isOnItem: ((CGPoint) -> Bool)?
+    var onMarquee: ((CGRect?, NSEvent.ModifierFlags) -> Void)?
+    private var marqueeStart: NSPoint?
+    private var marqueeFlags: NSEvent.ModifierFlags = []
+    private var marqueeActive = false
+    /// Top-left origin, matching SwiftUI coordinates of the scroll view this view backs.
+    override var isFlipped: Bool { true }
     private var monitor: Any?
     private var down: NSPoint?
     private var ledgerAtDown = 0
@@ -388,7 +446,7 @@ final class EmptyClickWatcherView: NSView {
         super.viewDidMoveToWindow()
         if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
         guard window != nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
             self?.observe(event); return event
         }
     }
@@ -398,8 +456,25 @@ final class EmptyClickWatcherView: NSView {
         if event.type == .leftMouseDown {
             down = visibleRect.contains(point) && event.modifierFlags.intersection([.command, .shift, .control]).isEmpty ? point : nil
             ledgerAtDown = TapLedger.count
+            let startsMarquee = onMarquee != nil && visibleRect.contains(point) && !event.modifierFlags.contains(.control) && isOnItem?(point) != true
+            marqueeStart = startsMarquee ? point : nil
+            marqueeFlags = event.modifierFlags.intersection([.command, .shift]); marqueeActive = false
             return
         }
+        if event.type == .leftMouseDragged {
+            guard let start = marqueeStart else { return }
+            if !marqueeActive && hypot(point.x - start.x, point.y - start.y) < 4 { return }
+            marqueeActive = true
+            let clipped = point.clamped(to: visibleRect)
+            onMarquee?(CGRect(x: min(start.x, clipped.x), y: min(start.y, clipped.y), width: abs(start.x - clipped.x), height: abs(start.y - clipped.y)), marqueeFlags)
+            return
+        }
+        if marqueeActive {
+            // A finished rubber band is not an empty-space click.
+            onMarquee?(nil, marqueeFlags); marqueeActive = false; marqueeStart = nil; down = nil
+            return
+        }
+        marqueeStart = nil
         guard let start = down else { return }
         down = nil
         guard hypot(point.x - start.x, point.y - start.y) < 4 else { return } // A drag, not a click.
@@ -408,4 +483,8 @@ final class EmptyClickWatcherView: NSView {
         DispatchQueue.main.async { [weak self] in if TapLedger.count == before { self?.action?() } }
     }
     // The monitor is removed when the view leaves its window (viewDidMoveToWindow with a nil window).
+}
+
+private extension NSPoint {
+    func clamped(to rect: NSRect) -> NSPoint { NSPoint(x: min(max(x, rect.minX), rect.maxX), y: min(max(y, rect.minY), rect.maxY)) }
 }
