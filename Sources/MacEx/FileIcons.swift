@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import MacExCore
 
@@ -10,7 +11,7 @@ struct FileIcons: NSViewRepresentable {
         let collection = BrowserCollection()
         collection.model = model; collection.delegate = context.coordinator; collection.dataSource = context.coordinator
         collection.isSelectable = true; collection.allowsMultipleSelection = true; collection.allowsEmptySelection = true
-        collection.backgroundColors = [.textBackgroundColor]
+        collection.backgroundColors = [Theme.canvasNS]; scroll.drawsBackground = true; scroll.backgroundColor = Theme.canvasNS
         let layout = NSCollectionViewFlowLayout()
         layout.itemSize = NSSize(width: 120, height: 124); layout.minimumInteritemSpacing = 12; layout.minimumLineSpacing = 16
         layout.sectionInset = NSEdgeInsets(top: 22, left: 22, bottom: 22, right: 22)
@@ -23,25 +24,39 @@ struct FileIcons: NSViewRepresentable {
         collection.setAccessibilityIdentifier("file-icons")
         scroll.documentView = collection
         context.coordinator.collection = collection
+        context.coordinator.observeSelection()
         return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let collection = scroll.documentView as? BrowserCollection else { return }
         let coordinator = context.coordinator
         coordinator.updating = true
-        if coordinator.entries != model.entries {
-            coordinator.entries = model.entries; collection.reloadData()
+        var reloaded = false
+        if coordinator.revision != model.entriesRevision {
+            coordinator.entries = model.entries; coordinator.revision = model.entriesRevision; collection.reloadData(); reloaded = true
         }
-        let selection = Set(model.entries.indices.filter { model.selection.contains(model.entries[$0].url) }.map { IndexPath(item: $0, section: 0) })
-        if collection.selectionIndexPaths != selection { collection.selectionIndexPaths = selection }
+        if reloaded { coordinator.apply(model.selection) }
         coordinator.updating = false
     }
     @MainActor final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate {
         let model: BrowserModel
         weak var collection: NSCollectionView?
         var entries: [FileEntry] = []
+        var revision = -1
         var updating = false
+        private var selectionObserver: AnyCancellable?
         init(_ model: BrowserModel) { self.model = model }
+        func observeSelection() {
+            selectionObserver = model.selectionChanges.sink { [weak self] in self?.apply($0) }
+        }
+        func apply(_ wanted: Set<URL>) {
+            guard let collection else { return }
+            let current = Set(collection.selectionIndexPaths.compactMap { entries.indices.contains($0.item) ? entries[$0.item].url : nil })
+            guard current != wanted else { return }
+            let paths = Set(entries.indices.filter { wanted.contains(entries[$0].url) }.map { IndexPath(item: $0, section: 0) })
+            let wasUpdating = updating; updating = true; collection.selectionIndexPaths = paths; updating = wasUpdating
+            if paths.count == 1 { collection.scrollToItems(at: paths, scrollPosition: .nearestHorizontalEdge) }
+        }
         func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int { entries.count }
         func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
             let item = collectionView.makeItem(withIdentifier: FileIconItem.identifier, for: indexPath) as! FileIconItem
@@ -86,10 +101,11 @@ struct FileIcons: NSViewRepresentable {
     private var representedURL: URL?
     override var isSelected: Bool { didSet { styleSelection() } }
     override func loadView() {
-        view = FileIconView(); view.wantsLayer = true; view.layer?.cornerRadius = 9
+        view = FileIconView(); view.wantsLayer = true; view.layer?.cornerRadius = 12; view.layer?.cornerCurve = .continuous
+        (view as? FileIconView)?.hoverChanged = { [weak self] in self?.styleSelection() }
         let image = NSImageView(); image.translatesAutoresizingMaskIntoConstraints = false; image.imageScaling = .scaleProportionallyUpOrDown
         let label = NSTextField(wrappingLabelWithString: ""); label.translatesAutoresizingMaskIntoConstraints = false
-        label.alignment = .center; label.font = .systemFont(ofSize: 12); label.maximumNumberOfLines = 2; label.lineBreakMode = .byTruncatingMiddle
+        label.isSelectable = false; label.isEditable = false; label.alignment = .center; label.font = .systemFont(ofSize: 12); label.maximumNumberOfLines = 2; label.lineBreakMode = .byTruncatingMiddle
         view.addSubview(image); view.addSubview(label); imageView = image; textField = label
         NSLayoutConstraint.activate([
             image.topAnchor.constraint(equalTo: view.topAnchor, constant: 8), image.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -125,13 +141,36 @@ struct FileIcons: NSViewRepresentable {
     func cancelThumbnail() { Thumbnails.shared.cancel(token); token = nil }
     override func prepareForReuse() { super.prepareForReuse(); cancelThumbnail(); representedURL = nil; imageView?.image = nil }
     private func styleSelection() {
-        view.layer?.backgroundColor = (isSelected ? NSColor.controlAccentColor.withAlphaComponent(0.18) : .clear).cgColor
+        let hovered = (view as? FileIconView)?.hovered ?? false
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            let color = isSelected ? Theme.selectionNS : hovered ? Theme.hoverNS : NSColor.clear
+            CATransaction.begin(); CATransaction.setAnimationDuration(0.14)
+            view.layer?.backgroundColor = color.cgColor
+            view.layer?.borderWidth = isSelected ? 1 : 0
+            view.layer?.borderColor = Theme.accentNS.withAlphaComponent(0.35).cgColor
+            CATransaction.commit()
+        }
+        imageView?.layer?.transform = CATransform3DIdentity
         view.setAccessibilitySelected(isSelected)
     }
 }
 
 @MainActor private final class FileIconView: NSView {
     var pressAction: (() -> Void)?
+    var hoverChanged: (() -> Void)?
+    private(set) var hovered = false
+    private var tracking: NSTrackingArea?
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area); tracking = area
+    }
+    /// The whole tile belongs to the collection view: labels and images never take the click, so selection,
+    /// double-click, drag and context menus all go through one code path.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func mouseEntered(with event: NSEvent) { hovered = true; hoverChanged?() }
+    override func mouseExited(with event: NSEvent) { hovered = false; hoverChanged?() }
     override func accessibilityPerformPress() -> Bool { pressAction?(); return pressAction != nil }
 }
 
@@ -144,11 +183,23 @@ struct FileIcons: NSViewRepresentable {
         super.viewDidMoveToWindow()
         if !receivedFocus, let window { window.makeFirstResponder(self); receivedFocus = true }
     }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    /// Selection and double-click are resolved on mouse-down. NSCollectionView's own handler runs a drag-tracking
+    /// loop first, which delayed selection and could swallow the second click of a double-click.
     override func mouseDown(with event: NSEvent) {
+        let path = indexPathForItem(at: convert(event.locationInWindow, from: nil))
+        let plain = event.modifierFlags.intersection([.command, .shift, .control]).isEmpty
+        if event.clickCount == 2, plain, let path, let model, model.entries.indices.contains(path.item) {
+            model.open(model.entries[path.item]); return
+        }
+        if plain, let path, !selectionIndexPaths.contains(path) {
+            selectionIndexPaths = [path]
+            delegate?.collectionView?(self, didSelectItemsAt: [path])
+        }
         super.mouseDown(with: event)
-        if event.clickCount == 2, let path = indexPathForItem(at: convert(event.locationInWindow, from: nil)), let model, model.entries.indices.contains(path.item) { model.open(model.entries[path.item]) }
     }
     override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.intersection([.command, .control, .option]) == .command, event.keyCode == 31 || event.keyCode == 125 { model?.openSelection(); return }
         if event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
             if event.keyCode == 49 { model?.quickLook?(); return }
             if event.keyCode == 36 || event.keyCode == 76 { model?.rename(); return }

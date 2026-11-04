@@ -29,7 +29,7 @@ final class Thumbnails {
     }
 
     func icon(_ entry: FileEntry) -> NSImage {
-        if entry.isFolder { return NSWorkspace.shared.icon(for: UTType.folder) }
+        if entry.isFolder { return FolderArt.image }
         if entry.identity.isSymbolicLink { return NSImage(systemSymbolName: "link", accessibilityDescription: "Symbolic link")! }
         let ext = entry.url.pathExtension.lowercased()
         if let image = iconCache[ext] { return image }

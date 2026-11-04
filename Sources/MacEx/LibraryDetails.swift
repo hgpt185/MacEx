@@ -9,27 +9,34 @@ import MacExCore
 @MainActor private final class DocumentPreviewState: ObservableObject {
     @Published var text: String?
     @Published var data: Data?
+    @Published var image: CGImage?
     @Published var error: String?
     @Published var loading = false
     let video = AVPlayer()
     private var generation = UUID()
     func load(_ url: URL?) {
         let token = UUID(); generation = token
-        text = nil; data = nil; error = nil; video.pause(); video.replaceCurrentItem(with: nil)
+        text = nil; data = nil; image = nil; error = nil; video.pause(); video.replaceCurrentItem(with: nil)
         guard let url else { return }; loading = true
         Task {
             do {
                 guard !FileAvailability.isOnlineOnly(url) else { throw FileFailure.message("Online-only file skipped.") }
                 let type = LocalFileMetadata.mediaType(url)
                 if type == "video" || type == "audio" { video.replaceCurrentItem(with: AVPlayerItem(url: url)); loading = false; return }
-                let result = try await Task.detached(priority: .userInitiated) { () -> (String?, Data?) in
+                let result = try await Task.detached(priority: .userInitiated) { () -> (String?, Data?, CGImage?) in
                     let identity = try FileIdentity(url)
                     guard identity.isRegular, identity.size <= 64 * 1024 * 1024 else { throw FileFailure.message("Inline preview supports local regular files up to 64 MiB.") }
-                    if type == "text" || ["json", "md", "log", "yaml", "toml"].contains(url.pathExtension.lowercased()) { return (try BoundedTextReader.read(url).text, nil) }
-                    if type == "image" || type == "pdf" { return (nil, try LocalFileBytes.read(url, limit: 64 * 1024 * 1024)) }
+                    if type == "text" || ["json", "md", "log", "yaml", "toml"].contains(url.pathExtension.lowercased()) { return (try BoundedTextReader.read(url).text, nil, nil) }
+                    if type == "image" || type == "pdf" {
+                        let bytes = try LocalFileBytes.read(url, limit: 64 * 1024 * 1024)
+                        guard type == "image" else { return (nil, bytes, nil) }
+                        let thumb = CGImageSourceCreateWithData(bytes as CFData, nil).flatMap { CGImageSourceCreateThumbnailAtIndex($0, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 2048, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) }
+                        // Keep only the decoded preview; holding the raw bytes too would double memory for large photos.
+                        return (nil, nil, thumb)
+                    }
                     throw FileFailure.message("No inline preview for this file type. Its metadata stays available here.")
                 }.value
-                guard !Task.isCancelled, generation == token else { return }; text = result.0; data = result.1
+                guard !Task.isCancelled, generation == token else { return }; text = result.0; data = result.1; image = result.2
             } catch { guard generation == token else { return }; self.error = error.localizedDescription }
             guard generation == token else { return }; loading = false
         }
@@ -44,7 +51,7 @@ struct StandaloneInlinePreview: View {
             if state.loading { ProgressView() }
             else if let text = state.text { ScrollView { Text(text).font(.system(size: 12, design: .monospaced)).textSelection(.enabled).padding(16) } }
             else if let data = state.data, url.pathExtension.lowercased() == "pdf" { EmbeddedPDF(data: data) }
-            else if let data = state.data, let source = CGImageSourceCreateWithData(data as CFData, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 2048] as CFDictionary) { Image(decorative: image, scale: 1).resizable().scaledToFit() }
+            else if let image = state.image { Image(decorative: image, scale: 1).resizable().scaledToFit() }
             else if state.video.currentItem != nil { EmbeddedVideo(player: state.video) }
             else { ContentUnavailableView("Preview unavailable", systemImage: "doc", description: Text(state.error ?? "Unsupported format")) }
         }.task(id: url) { state.load(url) }.onDisappear { state.video.pause() }
@@ -58,24 +65,25 @@ struct LibraryInspector: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(model.previewURL == nil ? "Inspector" : "Preview").font(.headline); Spacer()
+                Text(model.previewURL == nil ? "Inspector" : "Preview").font(.system(size: 13, weight: .semibold)); Spacer()
                 if model.previewURL != nil {
                     Button { model.stepPreview(-1) } label: { Image(systemName: "chevron.left") }
                     Button { model.stepPreview(1) } label: { Image(systemName: "chevron.right") }
                 }
                 Button { model.previewURL = nil; model.inspector = false } label: { Image(systemName: "xmark") }.help("Close preview")
-            }.buttonStyle(.plain).padding(18)
-            Divider()
+            }.buttonStyle(.plain).foregroundStyle(.secondary).padding(.horizontal, 18).frame(height: 44)
+            Rectangle().fill(Theme.hairline).frame(height: 1)
             if let url {
                 Group {
                     if state.loading { ProgressView() }
                     else if let text = state.text { ScrollView { Text(text).font(.system(size: 12, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(16) } }
                     else if let data = state.data, url.pathExtension.lowercased() == "pdf" { EmbeddedPDF(data: data) }
-                    else if let data = state.data, let source = CGImageSourceCreateWithData(data as CFData, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 2048, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) { Image(decorative: image, scale: 1).resizable().scaledToFit().padding(14) }
+                    else if let image = state.image { Image(decorative: image, scale: 1).resizable().scaledToFit().padding(14) }
                     else if model.activeItem?.kind == .music { VStack(spacing: 12) { Image(systemName: "waveform").font(.system(size: 55)).foregroundStyle(.secondary); Text("Use the player at the bottom of your library.").font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center) }.padding(20) }
                     else if state.video.currentItem != nil { EmbeddedVideo(player: state.video) }
                     else { ContentUnavailableView("Preview", systemImage: "doc", description: Text(state.error ?? "Select a file.")) }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).id(url).transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    .animation(Theme.gentle, value: url)
                 Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
@@ -101,7 +109,7 @@ struct LibraryInspector: View {
                     }.padding(18)
                 }.frame(maxHeight: model.selectText ? 350 : 270)
             } else { ContentUnavailableView("Select a file", systemImage: "doc.text.magnifyingglass").frame(maxWidth: .infinity, maxHeight: .infinity) }
-        }.background(Color(nsColor: .controlBackgroundColor)).task(id: url) { state.load(url); model.tags = model.activeItem?.tags.joined(separator: ", ") ?? "" }.onDisappear { state.video.pause() }
+        }.background(Theme.surface).task(id: url) { state.load(url); model.tags = model.activeItem?.tags.joined(separator: ", ") ?? "" }.onDisappear { state.video.pause() }
     }
     private func detail(_ label: String, _ value: String) -> some View { GridRow { Text(label).foregroundStyle(.secondary); Text(value).textSelection(.enabled) } }
 }
@@ -172,7 +180,9 @@ struct InlineDuplicates: View {
                                         Toggle("Trash", isOn: Binding(get: { cleanup.selected.contains(file.url) }, set: { if $0 { cleanup.retained[group.id] = keep; cleanup.selected.insert(file.url) } else { cleanup.selected.remove(file.url) } })).disabled(file.url == keep)
                                     }
                                 }
-                            }.padding(16).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                            }.padding(16)
+                                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surface))
+                                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.hairline, lineWidth: 1))
                         }
                         if scan.duplicates.isEmpty { ContentUnavailableView("No identical groups found", systemImage: "checkmark.circle") }
                     }

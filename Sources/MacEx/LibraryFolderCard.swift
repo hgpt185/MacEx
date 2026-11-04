@@ -12,45 +12,40 @@ struct LibraryFolderCard<Previews: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ZStack(alignment: .topLeading) {
+                // Back panel: saturated tone so the tab reads clearly in both appearances.
                 LibraryFolderBack()
-                    .fill(Color(nsColor: .controlBackgroundColor))
-                    .overlay {
-                        LibraryFolderBack().fill(tone.opacity(colorScheme == .dark ? 0.46 : 0.30))
-                    }
-                    .overlay {
-                        LibraryFolderBack().stroke(tone.opacity(0.18), lineWidth: 0.75)
-                    }
+                    .fill(LinearGradient(colors: [tone.opacity(colorScheme == .dark ? 0.75 : 0.55), tone.opacity(colorScheme == .dark ? 0.55 : 0.40)],
+                                         startPoint: .top, endPoint: .bottom))
                 HStack(spacing: 7) { previews }
-                    .padding(.horizontal, 18).padding(.top, 24)
+                    .padding(.horizontal, 18).padding(.top, 22)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityHidden(true)
+                // Front panel: frosted glass tinted by the tone, with a bright top edge.
                 LibraryFolderFront()
-                    .fill(Color(nsColor: .controlBackgroundColor))
-                    .overlay {
-                        LibraryFolderFront().fill(LinearGradient(
-                            colors: [tone.opacity(colorScheme == .dark ? 0.30 : 0.18), tone.opacity(colorScheme == .dark ? 0.18 : 0.10)],
-                            startPoint: .top, endPoint: .bottom))
-                    }
-                    .overlay {
-                        LibraryFolderFront().stroke(tone.opacity(colorScheme == .dark ? 0.32 : 0.22), lineWidth: 0.75)
-                    }
+                    .fill(.ultraThinMaterial)
+                    .overlay { LibraryFolderFront().fill(LinearGradient(colors: [tone.opacity(colorScheme == .dark ? 0.42 : 0.30), tone.opacity(colorScheme == .dark ? 0.26 : 0.16)], startPoint: .top, endPoint: .bottom)) }
+                    .overlay { LibraryFolderFront().stroke(LinearGradient(colors: [.white.opacity(colorScheme == .dark ? 0.35 : 0.7), .white.opacity(0.04)], startPoint: .top, endPoint: .bottom), lineWidth: 1) }
                 VStack {
                     Spacer()
-                    HStack {
-                        Image(systemName: symbol).font(.system(size: 26, weight: .medium))
-                            .foregroundStyle(tone.opacity(colorScheme == .dark ? 0.90 : 0.72))
+                    HStack(alignment: .bottom) {
+                        Image(systemName: symbol).font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(tone.opacity(colorScheme == .dark ? 0.85 : 0.75)))
+                            .shadow(color: tone.opacity(0.35), radius: 6, y: 2)
                         Spacer()
-                        Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(tone.opacity(0.65))
-                    }.padding(18)
+                        Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .frame(width: 24, height: 24).background(Circle().fill(.white.opacity(0.14)))
+                    }.padding(14)
                 }.accessibilityHidden(true)
             }
             .aspectRatio(1.55, contentMode: .fit)
             .clipShape(LibraryFolderBack())
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.18 : 0.07), radius: 4, x: 0, y: 3)
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.30 : 0.10), radius: 8, x: 0, y: 4)
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
                     .lineLimit(1).truncationMode(.middle)
                 Text(detail).font(.system(size: 11)).foregroundStyle(.secondary)
                     .lineLimit(1).minimumScaleFactor(0.85)

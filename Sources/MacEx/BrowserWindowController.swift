@@ -9,11 +9,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     let library: LibraryModel
     init(model: BrowserModel, library: LibraryModel) {
         self.model = model; self.library = library
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 820), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 820), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.minSize = NSSize(width: 640, height: 540)
-        window.title = "MacEx"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true; window.tabbingMode = .disallowed
+        window.title = "MacEx"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true; window.isMovableByWindowBackground = false; window.backgroundColor = Theme.canvasNS; window.tabbingMode = .disallowed
         super.init(window: window); window.delegate = self; model.window = window
-        window.contentView = NSHostingView(rootView: SingleWindowView(model: library, browser: model, interaction: model.workspace.interaction))
+        window.contentView = FirstMouseHostingView(rootView: SingleWindowView(model: library, browser: model, interaction: model.workspace.interaction))
         window.center()
     }
     required init?(coder: NSCoder) { nil }
@@ -22,4 +22,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         if model.busy { model.showingOperations = true; return false }
         library.previewURL = nil; sender.orderOut(nil); return false
     }
+}
+
+/// SwiftUI controls respond to the first click even while the window is inactive, instead of that click only activating it.
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

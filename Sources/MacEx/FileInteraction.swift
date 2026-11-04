@@ -36,8 +36,8 @@ final class FileMenuActions: NSObject {
             let item = NSMenuItem(title: title, action: selector, keyEquivalent: ""); item.target = self; item.isEnabled = enabled; menu.addItem(item)
         }
         if !model.selection.isEmpty {
-            add("Preview", #selector(open))
-            add("Preview in MacEx", #selector(quickLook))
+            add("Open", #selector(open))
+            add("Quick Look", #selector(quickLook))
             if model.searchActive && model.selection.count == 1 { add("Show in Enclosing Folder", #selector(revealParent)) }
             menu.addItem(.separator())
             add("Rename…", #selector(rename), enabled: model.selection.count == 1 && !model.busy)

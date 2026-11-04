@@ -1,0 +1,270 @@
+import AppKit
+import SwiftUI
+import UniformTypeIdentifiers
+import MacExCore
+
+/// Shared page chrome so Library and Tools pages look and behave like folder pages:
+/// a compact header row, an edge-to-edge list with hover/selection plates, and matching grid tiles.
+
+struct PageHeader<Trailing: View>: View {
+    let symbol: String
+    let title: String
+    var detail: String? = nil
+    var tint: Color = Theme.accent
+    @ViewBuilder var trailing: Trailing
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(tint).frame(width: 18)
+                Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                    .accessibilityIdentifier("library-page-title")
+                if let detail { Text(detail).font(.system(size: 12)).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1) }
+            }.padding(.horizontal, 6).padding(.vertical, 4)
+            Spacer(minLength: 8)
+            trailing
+        }.padding(.horizontal, 18).padding(.top, 4).padding(.bottom, 10).frame(minHeight: 44)
+    }
+}
+extension PageHeader where Trailing == EmptyView {
+    init(symbol: String, title: String, detail: String? = nil, tint: Color = Theme.accent) {
+        self.init(symbol: symbol, title: title, detail: detail, tint: tint) { EmptyView() }
+    }
+}
+
+/// One line of secondary explanation under a header.
+struct PageNote: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 24).padding(.bottom, 10)
+    }
+}
+
+/// Rounded surface used for grouped tool content (duplicate groups, settings sections, connection forms).
+struct Panel<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        content.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surface))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.hairline, lineWidth: 1))
+    }
+}
+
+/// Small borderless action with a hover plate, for header toolbars.
+struct HeaderButton: View {
+    let title: String
+    var symbol: String? = nil
+    var role: ButtonRole? = nil
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
+    var body: some View {
+        Button(role: role, action: action) {
+            HStack(spacing: 5) {
+                if let symbol { Image(systemName: symbol).font(.system(size: 11, weight: .semibold)) }
+                Text(title).font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(!enabled ? AnyShapeStyle(.tertiary) : role == .destructive ? AnyShapeStyle(Color.red) : AnyShapeStyle(Theme.accent))
+            .padding(.horizontal, 9).frame(height: 26)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hovering && enabled ? Theme.hover : .clear))
+            .contentShape(Rectangle())
+        }.buttonStyle(PressableStyle()).onHover { hovering = $0 }.animation(Theme.gentle, value: hovering)
+            .accessibilityLabel(title)
+    }
+}
+
+/// Per-extension system icons, shared by list rows (thumbnails are reserved for grid tiles).
+@MainActor enum RowIcons {
+    private static var cache: [String: NSImage] = [:]
+    static func icon(for item: LibraryFile) -> NSImage {
+        let ext = item.url.pathExtension.lowercased()
+        let key = (item.package ? "pkg:" : "") + ext
+        if let hit = cache[key] { return hit }
+        let image = item.package ? NSWorkspace.shared.icon(forFile: item.path) : NSWorkspace.shared.icon(for: UTType(filenameExtension: ext) ?? .data)
+        if !item.package || ext != "app" { if cache.count < 256 { cache[key] = image } }
+        return image
+    }
+    static let formatter: DateFormatter = {
+        let formatter = DateFormatter(); formatter.dateStyle = .medium; formatter.timeStyle = .short; formatter.doesRelativeDateFormatting = true; return formatter
+    }()
+}
+
+/// Selection rules shared by list and grid: click selects, ⌘ toggles, ⇧ extends, double-click opens.
+@MainActor struct ClickSelection {
+    @Binding var selection: Set<String>
+    @Binding var anchor: String?
+    let order: [String]
+    let open: (String) -> Void
+    func click(_ id: String) {
+        let event = NSApp.currentEvent
+        if (event?.clickCount ?? 1) >= 2 { selection = [id]; anchor = id; open(id); return }
+        let flags = event?.modifierFlags ?? []
+        if flags.contains(.command) {
+            if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
+            anchor = id
+        } else if flags.contains(.shift), let anchor, let from = order.firstIndex(of: anchor), let to = order.firstIndex(of: id) {
+            selection = Set(order[min(from, to)...max(from, to)])
+        } else {
+            if selection != [id] { selection = [id] }
+            anchor = id
+        }
+    }
+}
+
+struct ListColumnHeader: View {
+    @Binding var sortOrder: String
+    var showsSource = true
+    var body: some View {
+        HStack(spacing: 14) {
+            column("Name", key: "Name").frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 30)
+            column("Date Added", key: "Newest").frame(width: 150, alignment: .leading)
+            column("Size", key: "Size").frame(width: 80, alignment: .trailing)
+            column("Kind", key: "Kind").frame(width: 110, alignment: .leading)
+            if showsSource { Text("From").frame(width: 110, alignment: .leading) }
+        }
+        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+        .padding(.horizontal, 20).frame(height: 26)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+    }
+    private func column(_ title: String, key: String) -> some View {
+        Button { withAnimation(Theme.gentle) { sortOrder = key } } label: {
+            HStack(spacing: 4) {
+                Text(title)
+                if sortOrder == key { Image(systemName: key == "Name" || key == "Kind" ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .bold)) }
+            }.foregroundStyle(sortOrder == key ? .primary : .secondary).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+    }
+}
+
+struct LibraryFileRow: View {
+    let item: LibraryFile
+    let selected: Bool
+    var showsSource = true
+    @State private var hovering = false
+    var body: some View {
+        HStack(spacing: 14) {
+            HStack(spacing: 10) {
+                Image(nsImage: RowIcons.icon(for: item)).resizable().interpolation(.high).frame(width: 20, height: 20)
+                Text(item.name).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                    .foregroundStyle(item.onlineOnly ? .secondary : .primary)
+                if item.onlineOnly { Image(systemName: "icloud").font(.system(size: 10)).foregroundStyle(.tertiary) }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Text(RowIcons.formatter.string(from: item.added ?? item.created ?? item.modified)).frame(width: 150, alignment: .leading)
+            Text(item.package ? "—" : ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file)).monospacedDigit().frame(width: 80, alignment: .trailing)
+            Text(item.kind.rawValue).frame(width: 110, alignment: .leading)
+            if showsSource { Text(item.source ?? "—").lineLimit(1).truncationMode(.middle).frame(width: 110, alignment: .leading) }
+        }
+        .font(.system(size: 12)).foregroundStyle(.secondary)
+        .padding(.horizontal, 14).frame(height: 34)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selected ? Theme.selection : hovering ? Theme.hover : .clear))
+        .padding(.horizontal, 6)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .animation(Theme.gentle, value: hovering).animation(Theme.gentle, value: selected)
+        .accessibilityElement(children: .combine).accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Grid tile matching the folder icon view: thumbnail on top, centered name, rounded selection plate.
+struct LibraryTile: View {
+    let item: LibraryFile
+    let selected: Bool
+    let size: CGFloat
+    @State private var hovering = false
+    var body: some View {
+        VStack(spacing: 7) {
+            LibraryThumbnail(url: item.url, symbol: item.onlineOnly ? "icloud" : item.kind.symbol)
+                .frame(width: size * 0.78, height: size * 0.62)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .shadow(color: .black.opacity(hovering ? 0.18 : 0.08), radius: hovering ? 6 : 2, y: hovering ? 3 : 1)
+                .scaleEffect(hovering ? 1.03 : 1)
+            Text(item.name).font(.system(size: 12)).multilineTextAlignment(.center).lineLimit(2).truncationMode(.middle)
+                .foregroundStyle(.primary)
+            Text(item.package ? item.kind.rawValue : ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file))
+                .font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
+        }
+        .padding(8).frame(width: size)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(selected ? Theme.selection : hovering ? Theme.hover : .clear))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(selected ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .animation(Theme.snappy, value: hovering).animation(Theme.gentle, value: selected)
+        .accessibilityElement(children: .combine).accessibilityLabel(item.name)
+    }
+}
+
+/// The library's file list and grid with folder-page behavior.
+struct LibraryFileBrowser<Menu: View>: View {
+    let items: [LibraryFile]
+    @Binding var selection: Set<String>
+    @Binding var sortOrder: String
+    let grid: Bool
+    var tileSize: CGFloat = 150
+    var showsSource = true
+    let open: (LibraryFile) -> Void
+    @ViewBuilder let menu: (LibraryFile) -> Menu
+    @State private var anchor: String?
+    var body: some View {
+        let clicks = ClickSelection(selection: $selection, anchor: $anchor, order: items.map(\.path)) { path in
+            if let item = items.first(where: { $0.path == path }) { open(item) }
+        }
+        Group {
+            if grid {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: tileSize, maximum: tileSize + 40), spacing: 12)], spacing: 14) {
+                        ForEach(items) { item in
+                            LibraryTile(item: item, selected: selection.contains(item.path), size: tileSize)
+                                .onTapGesture { clicks.click(item.path) }
+                                .modifier(LibraryDragItem(url: item.url))
+                                .contextMenu { menu(item) }
+                        }
+                    }.padding(.horizontal, 20).padding(.vertical, 14)
+                }
+            } else {
+                // The header is pinned inside the scroll view so its columns share the rows' width (scrollbar included).
+                ScrollView {
+                    LazyVStack(spacing: 2, pinnedViews: [.sectionHeaders]) {
+                        Section {
+                            ForEach(items) { item in
+                                LibraryFileRow(item: item, selected: selection.contains(item.path), showsSource: showsSource)
+                                    .onTapGesture { clicks.click(item.path) }
+                                    .modifier(LibraryDragItem(url: item.url))
+                                    .contextMenu { menu(item) }
+                            }
+                        } header: {
+                            ListColumnHeader(sortOrder: $sortOrder, showsSource: showsSource).background(Theme.canvas).padding(.bottom, 4)
+                        }
+                    }.padding(.bottom, 6)
+                }
+            }
+        }
+        .background(Theme.canvas)
+        .modifier(LibraryDragContainer(urls: selection.map { URL(fileURLWithPath: $0) }))
+        .transition(.opacity)
+    }
+}
+
+/// Plain row for non-file lists on tool pages (sources, Trash history), styled like file rows.
+struct ToolRow<Trailing: View>: View {
+    let symbol: String
+    let title: String
+    var subtitle: String? = nil
+    @ViewBuilder var trailing: Trailing
+    @State private var hovering = false
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).font(.system(size: 14)).foregroundStyle(Theme.accent).frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                if let subtitle { Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled) }
+            }
+            Spacer(minLength: 8)
+            trailing
+        }
+        .padding(.horizontal, 14).frame(minHeight: 44)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hovering ? Theme.hover : .clear))
+        .padding(.horizontal, 6)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }.animation(Theme.gentle, value: hovering)
+    }
+}

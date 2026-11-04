@@ -5,9 +5,10 @@ struct LibrarySettingsView: View {
     @ObservedObject var model: LibraryModel
     @ObservedObject private var appearance = AppearanceModel.shared
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+        PageHeader(symbol: "gearshape", title: "Settings")
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Settings").font(.largeTitle).bold()
                 GroupBox("Library folders") {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("MacEx finds files in your Desktop, Documents, Downloads, Pictures, Music and Movies folders, plus installed applications. Remove locations you do not want included, or add another folder. Recognition is a separate choice.").font(.callout).foregroundStyle(.secondary)
@@ -86,7 +87,8 @@ struct LibrarySettingsView: View {
                         Text("Open source · MIT · GitHub preview · Not notarized").font(.caption).foregroundStyle(.secondary)
                     }.font(.callout).padding(12)
                 }
-            }.padding(28).frame(maxWidth: 850, alignment: .leading)
+            }.padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: 850, alignment: .leading)
+        }
         }.onDisappear { model.save() }
             .onChange(of: model.settings.playful) { _, _ in model.save() }
             .onChange(of: model.settings.cardSize) { _, _ in model.save() }
@@ -141,19 +143,24 @@ struct SimilarPhotosView: View {
     @ObservedObject var model: LibraryModel
     @StateObject private var state = SimilarPhotoState()
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack { Text("Similar Photos").font(.largeTitle).bold(); Spacer(); Button("Find Look-alikes") { state.scan(model.snapshot.items.sorted { $0.modified > $1.modified }) }.disabled(state.running || model.scanning) }
-            Text("Compares the most recent local images in your library. Refresh Library to pick up newly added files.").font(.caption).foregroundStyle(.secondary)
-            Text(state.status).font(.callout).foregroundStyle(.secondary)
-            HStack { Text("Similarity distance"); Slider(value: $state.distance, in: 0.01...0.5); Text(String(format: "%.2f", state.distance)).monospacedDigit() }
-            if state.running { HStack { ProgressView().controlSize(.small); Button("Cancel", action: state.cancel) } }
+        VStack(alignment: .leading, spacing: 0) {
+        PageHeader(symbol: "rectangle.on.rectangle", title: "Similar Photos", detail: state.groups.isEmpty ? nil : "\(state.groups.count) groups") {
+            HeaderButton(title: state.running ? "Cancel" : "Find Look-alikes", symbol: state.running ? "xmark" : "sparkle.magnifyingglass") {
+                if state.running { state.cancel() } else { state.scan(model.snapshot.items.sorted { $0.modified > $1.modified }) }
+            }.disabled(model.scanning)
+        }
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Compares the most recent local images in your library. \(state.status)").font(.system(size: 11)).foregroundStyle(.secondary)
+            HStack { Text("Similarity").font(.system(size: 12)); Slider(value: $state.distance, in: 0.01...0.5).frame(maxWidth: 260); Text(String(format: "%.2f", state.distance)).font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary); if state.running { ProgressView().controlSize(.small) } }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     ForEach(state.groups) { group in
                         VStack(alignment: .leading, spacing: 12) {
                             Text("\(group.items.count) visually similar images").font(.headline)
                             ForEach(group.items) { item in HStack { LibraryThumbnail(url: item.url, symbol: "photo").frame(width: 130, height: 100); VStack(alignment: .leading) { Text(item.name); Text(item.path).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Preview") { model.preview(item.url) }; Toggle("Select", isOn: Binding(get: { model.cleanupSelection.contains(item.path) }, set: { if $0 { model.cleanupSelection.insert(item.path) } else { model.cleanupSelection.remove(item.path) } })) } }
-                        }.padding(18).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 14))
+                        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surface))
+                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.hairline, lineWidth: 1))
                     }
                 }
             }
@@ -162,6 +169,7 @@ struct SimilarPhotosView: View {
                 guard state.groups.allSatisfy({ group in !group.items.allSatisfy { selected.contains($0.path) } }) else { state.status = "Keep at least one photo from each selected group."; return }
                 model.prepareTrash(state.groups.flatMap(\.items).filter { selected.contains($0.path) }, retaining: state.groups.compactMap { $0.items.first { !selected.contains($0.path) } })
             }.disabled(model.cleanupSelection.isEmpty || state.running) }
-        }.padding(26).onDisappear { state.cancel() }
+        }.padding(.horizontal, 24).padding(.bottom, 16)
+        }.onDisappear { state.cancel() }
     }
 }

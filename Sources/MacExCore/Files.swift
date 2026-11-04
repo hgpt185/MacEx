@@ -71,15 +71,57 @@ public struct FileEntry: Identifiable, Sendable, Equatable {
     public var isFolder: Bool { identity.isDirectory && !isPackage }
     public var size: Int64? { identity.isDirectory ? nil : identity.size }
 
+    /// Built from one lstat plus cheap lookups. Asking URL resource values for `localizedTypeDescription`
+    /// costs a Launch Services query per file (about 20 ms per 1,000 files); kinds are cached per extension instead.
     public init(url: URL) throws {
         self.url = url
         name = url.lastPathComponent
-        identity = try FileIdentity(url)
-        let values = try? url.resourceValues(forKeys: [.localizedTypeDescriptionKey, .isPackageKey, .isAliasFileKey, .isHiddenKey])
-        isPackage = values?.isPackage ?? false
-        isAlias = values?.isAliasFile ?? false
-        isHidden = (values?.isHidden ?? false) || name.hasPrefix(".")
-        kind = identity.isSymbolicLink ? "Symbolic link" : isAlias ? "Alias" : values?.localizedTypeDescription ?? (identity.isDirectory ? "Folder" : "File")
+        var value = stat()
+        guard url.withUnsafeFileSystemRepresentation({ lstat($0!, &value) }) == 0 else { throw FileFailure.posix(errno, url) }
+        identity = FileIdentity(value)
+        isHidden = value.st_flags & UInt32(UF_HIDDEN) != 0 || name.hasPrefix(".")
+        let ext = url.pathExtension.lowercased()
+        if identity.isDirectory {
+            isAlias = false
+            isPackage = !ext.isEmpty && ((try? url.resourceValues(forKeys: [.isPackageKey]).isPackage) ?? false)
+            kind = isPackage ? KindCache.package(ext) : "Folder"
+        } else if identity.isSymbolicLink {
+            isAlias = false; isPackage = false; kind = "Symbolic link"
+        } else {
+            isPackage = false
+            // Finder aliases have no ordinary extension ("Report alias", "Report.pdf alias"), so the xattr read
+            // is skipped for the common case of a known extension.
+            let plainExtension = !ext.isEmpty && !ext.contains(" ")
+            isAlias = identity.isRegular && !plainExtension && FinderInfo.isAlias(url)
+            if isAlias { kind = "Alias" }
+            else if plainExtension { kind = KindCache.file(ext) }
+            else { kind = identity.mode & 0o111 != 0 ? "Unix executable" : "Document" }
+        }
+    }
+}
+
+/// Localized kind names are identical for every file sharing an extension, so they are resolved once per process.
+enum KindCache {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var files: [String: String] = [:]
+    nonisolated(unsafe) private static var packages: [String: String] = [:]
+    static func file(_ ext: String) -> String { lookup(ext, in: &files) { UTType(filenameExtension: ext)?.localizedDescription ?? "\(ext.uppercased()) file" } }
+    static func package(_ ext: String) -> String { lookup(ext, in: &packages) { UTType(filenameExtension: ext, conformingTo: .package)?.localizedDescription ?? "Package" } }
+    private static func lookup(_ ext: String, in table: inout [String: String], _ make: () -> String) -> String {
+        lock.lock(); if let hit = table[ext] { lock.unlock(); return hit }; lock.unlock()
+        let value = make()
+        lock.lock(); if table.count < 2_048 { table[ext] = value }; lock.unlock()
+        return value
+    }
+}
+
+/// Reads the Finder alias flag directly (one small xattr read) instead of a Launch Services resource query.
+enum FinderInfo {
+    static func isAlias(_ url: URL) -> Bool {
+        var info = [UInt8](repeating: 0, count: 32)
+        let count = url.withUnsafeFileSystemRepresentation { path in getxattr(path!, "com.apple.FinderInfo", &info, 32, 0, XATTR_NOFOLLOW) }
+        guard count >= 10 else { return false }
+        return (UInt16(info[8]) << 8 | UInt16(info[9])) & 0x8000 != 0 // kIsAlias
     }
 }
 
@@ -105,14 +147,16 @@ public enum DirectoryReader {
     public static func read(_ url: URL, control: JobControl = JobControl(),
                             onBatch: (@Sendable ([FileEntry]) -> Void)? = nil) throws -> [FileEntry] {
         try control.checkCancellation()
-        let keys: [URLResourceKey] = [.localizedTypeDescriptionKey, .isPackageKey, .isAliasFileKey, .isHiddenKey]
-        let urls = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: keys)
+        // No prefetched keys: FileEntry gathers what it needs far more cheaply than the bulk resource prefetch.
+        let urls = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [])
         var entries: [FileEntry] = []
-        for child in urls {
-            try control.checkCancellation()
+        entries.reserveCapacity(urls.count)
+        for (index, child) in urls.enumerated() {
+            if index & 255 == 0 { try control.checkCancellation() }
             do { entries.append(try FileEntry(url: child)) }
             catch FileFailure.posix(ENOENT, _) { continue } // A concurrent deletion is normal.
-            if entries.count == 250 || entries.count.isMultiple(of: 2_000) { onBatch?(entries) }
+            // One early batch paints large folders quickly; further batches would only re-sort on the main thread.
+            if entries.count == 400 && urls.count > 2_000 { onBatch?(entries) }
         }
         return entries
     }

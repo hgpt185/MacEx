@@ -146,7 +146,8 @@ import MacExCore
                 }
                 if event.keyCode == 53 { library.previewURL = nil; library.inspector = false; return true }
                 if event.keyCode == 49 && !event.modifierFlags.contains(.command) { self.preview(); return true }
-                if library.previewURL != nil && [123,124,125,126].contains(event.keyCode) {
+                // In folders the table/grid moves the selection natively and the preview follows it.
+                if library.previewURL != nil && library.route != .folder && [123,124,125,126].contains(event.keyCode) {
                     let columns = max(1, Int(((self.controller?.window?.frame.width ?? 1240) - 250) / (library.settings.cardSize + 18)))
                     library.stepPreview(event.keyCode == 123 ? -1 : event.keyCode == 124 ? 1 : event.keyCode == 125 ? columns : -columns); return true
                 }
@@ -163,7 +164,7 @@ import MacExCore
             root.submenu = menu; main.addItem(root)
         }
         add("MacEx", [("About MacEx", #selector(about), "", []), ("Settings", #selector(settings), ",", .command), ("Hide MacEx", #selector(hide), "h", .command), ("Quit MacEx", #selector(quit), "q", .command)])
-        add("File", [("Home", #selector(home), "n", .command), ("Preview", #selector(preview), "o", .command), ("New Folder", #selector(newFolder), "n", [.command,.shift]), ("Rename", #selector(rename), "", []), ("Duplicate", #selector(duplicate), "d", .command), ("Move to Trash", #selector(trash), "\u{8}", .command), ("Connect with SFTP", #selector(connect), "k", .command), ("Close Preview / Hide Window", #selector(close), "w", .command)])
+        add("File", [("Home", #selector(home), "n", .command), ("Open", #selector(openSelection), "o", .command), ("Quick Look", #selector(preview), "y", .command), ("New Folder", #selector(newFolder), "n", [.command,.shift]), ("Rename", #selector(rename), "", []), ("Duplicate", #selector(duplicate), "d", .command), ("Move to Trash", #selector(trash), "\u{8}", .command), ("Connect with SFTP", #selector(connect), "k", .command), ("Close Preview / Hide Window", #selector(close), "w", .command)])
         // Native text editing actions retain their responder-chain behavior in the search field.
         let editRoot = NSMenuItem(title: "Edit", action: nil, keyEquivalent: ""); let edit = NSMenu(title: "Edit")
         for (title, action, key) in [("Undo", Selector(("undo:")), "z"), ("Cut", #selector(NSText.cut(_:)), "x"), ("Copy", #selector(NSText.copy(_:)), "c"), ("Paste", #selector(NSText.paste(_:)), "v"), ("Select All", #selector(NSText.selectAll(_:)), "a")] { edit.addItem(NSMenuItem(title: title, action: action, keyEquivalent: key)) }
@@ -172,13 +173,21 @@ import MacExCore
         add("Go", [("Home", #selector(home), "h", [.command,.shift]), ("Go to Folder", #selector(go), "g", [.command,.shift]), ("Back", #selector(back), "[", .command), ("Forward", #selector(forward), "]", .command)])
         NSApp.mainMenu = main
     }
-    func validateMenuItem(_ item: NSMenuItem) -> Bool { true }
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(back) { return library?.canGoBack == true && workspace.interaction.request == nil }
+        if item.action == #selector(forward) { return library?.canGoForward == true && workspace.interaction.request == nil }
+        return true
+    }
     private func selectFiles() {
         guard let library, library.route != .folder && library.route != .trash else { return }
         browser?.entries = library.snapshot.items.filter { library.selected.contains($0.path) }.compactMap { try? FileEntry(url: $0.url) }
         browser?.selection = Set(browser?.entries.map(\.url) ?? [])
     }
     @objc func openMain() { show() }
+    @objc func openSelection() {
+        if library?.route == .folder || library?.route == .trash { browser?.openSelection() }
+        else if let library { for path in library.selected.prefix(10) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } }
+    }
     @objc func home() { show(); library?.show(.home) }
     @objc func settings() { show(); library?.show(.settings) }
     @objc func sources() { library?.show(.sources) }
@@ -197,13 +206,13 @@ import MacExCore
     @objc func play() { library?.togglePlay() }
     @objc func refresh() { if library?.route == .folder || library?.route == .trash { browser?.reload() } else { library?.refresh() } }
     @objc func connect() { show(); library?.show(.servers) }
-    @objc func newFolder() { library?.route = .folder; browser?.newFolder() }
+    @objc func newFolder() { library?.show(.folder); browser?.newFolder() }
     @objc func rename() { selectFiles(); browser?.rename() }
     @objc func duplicate() { selectFiles(); browser?.duplicate() }
     @objc func trash() { selectFiles(); browser?.trash() }
-    @objc func go() { library?.show(.folder); browser?.goToFolder() }
-    @objc func back() { library?.route = .folder; browser?.back() }
-    @objc func forward() { library?.route = .folder; browser?.forward() }
+    @objc func go() { browser?.goToFolder() }
+    @objc func back() { guard workspace.interaction.request == nil else { return }; library?.goBack() }
+    @objc func forward() { guard workspace.interaction.request == nil else { return }; library?.goForward() }
     @objc func close() { if library?.previewURL != nil { library?.previewURL = nil; library?.inspector = false } else { controller?.window?.performClose(nil) } }
     @objc func hide() { NSApp.hide(nil) }
     @objc func quit() { NSApp.terminate(nil) }

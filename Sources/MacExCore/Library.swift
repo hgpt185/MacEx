@@ -83,8 +83,12 @@ public enum LibraryScanner {
     public static let maxRoots = 24
     public static let maxEntries = 100_000
     public static let maxItems = 20_000
-    public static func scan(roots: [URL], control: JobControl = JobControl(), progress: (@Sendable (Int) -> Void)? = nil) -> LibrarySnapshot {
+    /// `previous` makes rescans incremental: a file whose signature (inode, size, mtime, ctime) is unchanged keeps its
+    /// earlier record, skipping the Spotlight, xattr and image-header reads that dominate scan cost (~1 ms per file).
+    /// Tag and metadata edits change ctime, so they are still picked up.
+    public static func scan(roots: [URL], control: JobControl = JobControl(), previous: [LibraryFile] = [], progress: (@Sendable (Int) -> Void)? = nil) -> LibrarySnapshot {
         var items: [LibraryFile] = []; var seen = Set<String>(); var examined = 0; var skipped = 0; var complete = true
+        let prior = Dictionary(previous.lazy.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         var issues: [LibraryCoverageIssue] = []; var limitReached = false
         func issue(_ url: URL, _ message: String) {
             complete = false; skipped += 1
@@ -133,9 +137,16 @@ public enum LibraryScanner {
                 examined += 1
                 if enumerator.level > 32 { enumerator.skipDescendants(); limitReached = true; issue(url, "The library reached its 32-level folder limit."); continue }
                 if ["node_modules", "Library", ".git", ".build", ".Trash", "Vendor"].contains(url.lastPathComponent) { enumerator.skipDescendants(); skipped += 1; continue }
-                guard seen.insert(SearchScope.canonicalPath(url.path)).inserted else { enumerator.skipDescendants(); continue }
-                guard let identity = try? FileIdentity(url), !identity.isSymbolicLink,
-                      SearchScope.canonicalPath(url.resolvingSymlinksInPath().path) == SearchScope.canonicalPath(url.path) else { enumerator.skipDescendants(); skipped += 1; continue }
+                let path = SearchScope.canonicalPath(url.path)
+                guard seen.insert(path).inserted else { enumerator.skipDescendants(); continue }
+                guard let identity = try? FileIdentity(url), !identity.isSymbolicLink else { enumerator.skipDescendants(); skipped += 1; continue }
+                if identity.isRegular, let old = prior[path], !old.package, old.signature == LibraryFile.signature(identity) {
+                    items.append(old)
+                    if items.count.isMultiple(of: 100) { progress?(items.count) }
+                    continue
+                }
+                // Regular files sit in directories that already passed this check, so only directories need resolving.
+                guard !identity.isDirectory || SearchScope.canonicalPath(url.resolvingSymlinksInPath().path) == path else { enumerator.skipDescendants(); skipped += 1; continue }
                 let values = try? url.resourceValues(forKeys: keys)
                 let package = values?.isPackage == true || (identity.isDirectory && url.pathExtension.lowercased() == "app")
                 if package { enumerator.skipDescendants() }

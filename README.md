@@ -4,7 +4,7 @@
 
 A native, open-source Mac file library. **0.8.1 adds automatic discovery of your files and installed apps, aligned full-row sidebar buttons, and persistent System/Light/Dark appearance** to the single-window workflow: Home, categories, recent shelves, download sources, visible search filters, previews, music, cleanup, connections and settings.
 
-Files open inside MacEx. Space and double-click preview them in the existing window. Folder selection, rename, conflict handling, host-key review and transfer destinations use in-window controls. MacEx does not launch Finder, external file applications, separate Quick Look panels, browser windows, or additional file-manager windows for these actions. Dock reopening and global Quick Search reuse the same window. macOS-owned menus and permission prompts remain system UI.
+Double-click opens a file in its default macOS app; folders open inside MacEx. Space previews a file in the existing window, and the preview pane follows the selection while it is open. Folder selection, rename, conflict handling, host-key review and transfer destinations use in-window controls. MacEx does not launch Finder, separate Quick Look panels, browser windows, or additional file-manager windows for these actions. Dock reopening and global Quick Search reuse the same window. macOS-owned menus and permission prompts remain system UI.
 
 The app code is [MIT licensed](LICENSE). GitHub previews are universal, ad-hoc signed and **not notarized**. No Apple Developer Program membership, account, subscription, API key or cloud AI service is required. Bundled SSH dependencies retain their own [notices and source pins](Vendor/README.md).
 
@@ -17,6 +17,8 @@ The app code is [MIT licensed](LICENSE). GitHub previews are universal, ad-hoc s
 5. Open Duplicates or Clean Up, review candidates, and move explicit selections to Trash. Restore MacEx-managed Trash moves from the in-app history. Similar Photos has its own review flow and never claims visual similarity proves identical content.
 
 Sidebar symbols, titles and counts use consistent columns; the entire padded row, including blank space, activates its action. Settings offers **System**, **Light** and **Dark** appearance; the top bar switches Light/Dark. The choice persists across launches. System follows macOS; Playful colors remain a separate setting.
+
+Back and Forward stay visible across Home, library pages, folders, searches, and settings. Use the toolbar arrows or `⌘[` / `⌘]` to retrace visits, including edited search filters. A new destination clears Forward; typing within a search does not add a history step per character. Navigation history lasts for the current session.
 
 The main flow was informed by [Homy’s public workflow](https://tryhomy.app/). MacEx uses its own code, branding and assets. Homy’s purchase/licensing system, Finder shortcuts and floating search panel are not part of this open-source, single-window design.
 

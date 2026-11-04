@@ -101,10 +101,12 @@ struct InAppInteractionView: View {
                                 Spacer()
                                 Text(entry.kind).foregroundStyle(.secondary).font(.caption).lineLimit(1)
                             }
-                                .tag(entry.url).contentShape(Rectangle()).onTapGesture(count: 2) {
-                                    if entry.isFolder { model.read(entry.url) } else if request.kind == .file { model.finish(entry.url.path) }
-                                }
-                        }.frame(height: 230)
+                                .tag(entry.url).contentShape(Rectangle())
+                        }.contextMenu(forSelectionType: URL.self, menu: { _ in }, primaryAction: { urls in
+                            // Double-click or Return; the List keeps owning single-click selection.
+                            guard let url = urls.first, let entry = model.entries.first(where: { $0.url == url }) else { return }
+                            if entry.isFolder { model.read(entry.url) } else if request.kind == .file { model.finish(entry.url.path) }
+                        }).frame(height: 230)
                     }
                     if let error = model.error { Text(error).font(.caption).foregroundStyle(.red) }
                     HStack {

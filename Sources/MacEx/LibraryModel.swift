@@ -49,6 +49,19 @@ enum LibraryRoute: Equatable {
     var title: String { switch self { case .home: "Home"; case .recents: "Recents"; case let .kind(kind): kind.rawValue; case .large: "Large Files"; case .screenshots: "Screenshots"; case .sources: "Downloaded From"; case let .source(name): name; case .cleanup: "Clean Up"; case .duplicates: "Duplicates"; case .similar: "Similar Photos"; case .folder: "Folders"; case .search: "Search"; case .settings: "Settings"; case .servers: "Connections"; case .index: "Text Recognition"; case .trash: "Trash" } }
 }
 
+private struct LibraryNavigationEntry: Equatable {
+    var route: LibraryRoute
+    var folder: URL?
+    var folderSearch: BrowserSearchContext?
+    var folderFilter: String
+    var panel: BrowserPanel?
+    var phrase: String
+    var filters: LibraryQuery
+    var sourceFilter: String
+    var sortOrder: String
+    var cleanupName: String
+}
+
 @MainActor
 final class LibraryModel: ObservableObject {
     let browser: BrowserModel
@@ -79,8 +92,35 @@ final class LibraryModel: ObservableObject {
     @Published var reviewRetained: [LibraryFile] = []
     @Published var loaded = false
     @Published var route: LibraryRoute = .home
+    @Published private var backHistory: [LibraryNavigationEntry] = []
+    @Published private var forwardHistory: [LibraryNavigationEntry] = []
+    private var restoringNavigation = false
+    var canGoBack: Bool { !backHistory.isEmpty }
+    var canGoForward: Bool { !forwardHistory.isEmpty }
     @Published var settings = LibrarySettings()
-    @Published var snapshot = LibrarySnapshot()
+    @Published var snapshot = LibrarySnapshot() {
+        didSet { snapshotRevision &+= 1; kindCounts = Dictionary(grouping: snapshot.items, by: \.kind).mapValues(\.count) }
+    }
+    /// Bumped on every snapshot change; memoized views of the library are keyed on it.
+    private(set) var snapshotRevision = 0
+    private struct ItemsKey: Equatable { var revision: Int; var route: LibraryRoute; var source: String; var filters: LibraryQuery; var ocr: Int; var sort: String }
+    private var itemsCache: (key: ItemsKey, value: [LibraryFile])?
+    private var sourcesCache: (revision: Int, value: [(String, Int, Int64)])?
+    private var statsCache: (revision: Int, value: [LibraryKind: KindStats])?
+    private var ocrRevision = 0
+    struct KindStats { var count = 0; var bytes: Int64 = 0; var previews: [LibraryFile] = []; var recent: [LibraryFile] = [] }
+    /// Per-kind totals, card previews and recent files for Home, computed once per snapshot instead of per render.
+    var kindStats: [LibraryKind: KindStats] {
+        if let cache = statsCache, cache.revision == snapshotRevision { return cache.value }
+        var stats: [LibraryKind: KindStats] = [:]
+        for (kind, group) in Dictionary(grouping: snapshot.items, by: \.kind) {
+            stats[kind] = KindStats(count: group.count, bytes: group.reduce(0) { $0 + $1.bytes }, previews: Array(group.prefix(3)),
+                                    recent: Array(group.sorted { ($0.added ?? $0.modified) > ($1.added ?? $1.modified) }.prefix(8)))
+        }
+        statsCache = (snapshotRevision, stats); return stats
+    }
+    /// Cached per snapshot so sidebar renders do not regroup the whole library.
+    private(set) var kindCounts: [LibraryKind: Int] = [:]
     @Published var searchText = ""
     @Published var filters = LibraryQuery()
     @Published var selected = Set<String>()
@@ -96,8 +136,10 @@ final class LibraryModel: ObservableObject {
     @Published var remote: RemoteBrowserModel?
     @Published var musicURL: URL?
     @Published var playing = false
-    @Published var playback = 0.0
-    @Published var duration = 0.0
+    /// Playback position ticks twice a second; it lives in its own object so only the music bar redraws.
+    let clock = PlaybackClock()
+    var playback: Double { clock.position }
+    var duration: Double { clock.length }
     @Published var cleanupName = "Forgotten Downloads"
     @Published var cleanupSelection = Set<String>()
     @Published var cleanupReview = false
@@ -118,14 +160,21 @@ final class LibraryModel: ObservableObject {
     private var watchedRoots: [String] = []
     private var refreshTask: Task<Void, Never>?
     private var timer: Timer?
-    @Published private var ocrMatches = Set<String>()
+    @Published private var ocrMatches = Set<String>() { didSet { ocrRevision &+= 1 } }
     private var ocrToken = UUID()
     private var parsedSearchText = ""
     private var transcriptToken = UUID()
     var onShow: (() -> Void)?
     var onSettingsChanged: (() -> Void)?
     var activeItem: LibraryFile? { let path = previewURL?.path ?? selected.first; return snapshot.items.first { $0.path == path } }
+    /// Filtered and sorted library for the current page. Views read this several times per render, so the result is
+    /// memoized and recomputed only when the snapshot, route, filters, OCR matches or sort order change.
     var items: [LibraryFile] {
+        let key = ItemsKey(revision: snapshotRevision, route: route, source: sourceFilter, filters: filters, ocr: ocrRevision, sort: sortOrder)
+        if let cache = itemsCache, cache.key == key { return cache.value }
+        let value = computeItems(); itemsCache = (key, value); return value
+    }
+    private func computeItems() -> [LibraryFile] {
         var values = snapshot.items
         switch route {
         case let .kind(kind): values = values.filter { $0.kind == kind }
@@ -149,7 +198,9 @@ final class LibraryModel: ObservableObject {
         return values
     }
     var sources: [(String, Int, Int64)] {
-        Dictionary(grouping: snapshot.items.filter { $0.source != nil }, by: { $0.source! }).map { ($0.key, $0.value.count, $0.value.reduce(0) { $0 + $1.bytes }) }.sorted { $0.1 > $1.1 }
+        if let cache = sourcesCache, cache.revision == snapshotRevision { return cache.value }
+        let value = Dictionary(grouping: snapshot.items.filter { $0.source != nil }, by: { $0.source! }).map { ($0.key, $0.value.count, $0.value.reduce(0) { $0 + $1.bytes }) }.sorted { $0.1 > $1.1 }
+        sourcesCache = (snapshotRevision, value); return value
     }
     var latestDownloads: [LibraryFile] {
         let homeDownloads = settings.downloadsPath
@@ -177,8 +228,21 @@ final class LibraryModel: ObservableObject {
         self.browser = browser; self.workspace = browser.workspace; self.directory = directory
         browser.previewRequested = { [weak self] url in self?.preview(url) }
         browser.quickLook = { [weak self] in if let url = self?.browser.selected.first?.url { self?.preview(url) } }
-        browser.previewSelectionChanged = { [weak self] in if let previous = self?.previewURL, let url = self?.browser.selected.first?.url, previous != url { self?.preview(url) } }
+        browser.previewSelectionChanged = { [weak self] in
+            // While the preview pane is open it follows the selection, so a single click is enough to look at a file.
+            guard let self, self.previewURL != nil || self.inspector, self.browser.selection.count == 1, let url = self.browser.selection.first,
+                  self.previewURL != url, self.browser.entries.first(where: { $0.url == url })?.isFolder != true else { return }
+            self.preview(url)
+        }
         browser.stateChanged = { [weak self] in self?.objectWillChange.send() }
+        browser.navigationRequested = { [weak self] target, search in
+            guard let self, !self.restoringNavigation else { return }
+            if self.route != .folder || self.browser.location != target || self.browser.searchContext != search || self.browser.activePanel != nil {
+                self.recordNavigation()
+            }
+            if self.route != .folder || self.browser.activePanel != nil { self.resetPage(.folder) }
+        }
+        browser.panelRequested = { [weak self] in self?.recordNavigation() }
         workspace.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         workspace.jobs.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         workspace.cleanup.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
@@ -195,7 +259,7 @@ final class LibraryModel: ObservableObject {
         }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .macexFilesChanged).sink { [weak self] _ in self?.refresh() }.store(in: &subscriptions)
         playerObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
-            Task { @MainActor [weak self] in guard let self else { return }; self.playback = time.seconds.isFinite ? time.seconds : 0; let seconds = self.player.currentItem?.duration.seconds ?? 0; self.duration = seconds.isFinite ? seconds : 0 }
+            Task { @MainActor [weak self] in guard let self else { return }; self.clock.update(position: time.seconds, length: self.player.currentItem?.duration.seconds ?? 0) }
         }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in
             let identifier = (note.object as? AVPlayerItem).map(ObjectIdentifier.init)
@@ -296,7 +360,12 @@ final class LibraryModel: ObservableObject {
         let roots = paths.map { URL(fileURLWithPath: $0, isDirectory: true) }
         Task {
             let receiver = self
-            let result = await Task.detached(priority: .utility) { LibraryScanner.scan(roots: roots, control: control) { count in Task { @MainActor [weak receiver] in if receiver?.scanning == true { receiver?.status = "Found \(count.formatted()) files…" } } } }.value
+            let previous = snapshot.items
+            let result = await Task.detached(priority: .utility) { LibraryScanner.scan(roots: roots, control: control, previous: previous) { count in
+                // Throttled: each status change redraws the window, and incremental rescans report thousands of files per second.
+                guard count.isMultiple(of: 1_000) else { return }
+                Task { @MainActor [weak receiver] in if receiver?.scanning == true { receiver?.status = "Found \(count.formatted()) files…" } }
+            } }.value
             if !control.isCancelled { snapshot = result; workspace.cleanup.invalidateCatalog(); persistSnapshot(); onSettingsChanged?() }
             scanning = false; scanControl = nil
             status = control.isCancelled ? "Refresh stopped. Previous library retained." : "\(result.items.count.formatted()) files · \(result.skipped) excluded\(result.complete ? "" : " · partial coverage; check folder access or limits") · online-only contents stay undownloaded"
@@ -316,15 +385,71 @@ final class LibraryModel: ObservableObject {
     func scheduleRefresh() { refreshTask?.cancel(); refreshTask = Task { [weak self] in do { try await Task.sleep(for: .seconds(3)) } catch { return }; self?.refresh() } }
     func cancelScan() { scanControl?.cancel(); workspace.localIndex.stop() }
     private func dismissPriorPages() { browser.showConnections = false; browser.showIndex = false; browser.showCleanup = false; browser.showSearch = false }
-    func show(_ destination: LibraryRoute) { dismissPriorPages(); searchTask?.cancel(); ocrToken = UUID(); searchingText = false; route = destination; parsedSearchText = ""; searchText = ""; filters = LibraryQuery(); selected = []; previewURL = nil; cleanupReview = false; cleanupSelection = []; sourceFilter = "" }
-    func search(_ phrase: String) {
+    private var navigationEntry: LibraryNavigationEntry {
+        LibraryNavigationEntry(route: route, folder: route == .folder ? browser.location : nil,
+                               folderSearch: route == .folder && browser.searchActive ? browser.searchContext : nil,
+                               folderFilter: route == .folder ? browser.filter : "", panel: browser.activePanel,
+                               phrase: route == .search ? parsedSearchText : "", filters: filters,
+                               sourceFilter: sourceFilter, sortOrder: sortOrder, cleanupName: cleanupName)
+    }
+    private func recordNavigation() {
+        guard !restoringNavigation else { return }
+        let entry = navigationEntry
+        if backHistory.last != entry { backHistory = Array((backHistory + [entry]).suffix(100)) }
+        forwardHistory = []
+    }
+    func goBack() {
+        guard let entry = backHistory.popLast() else { return }
+        forwardHistory = Array((forwardHistory + [navigationEntry]).suffix(100))
+        restoreNavigation(entry)
+    }
+    func goForward() {
+        guard let entry = forwardHistory.popLast() else { return }
+        backHistory = Array((backHistory + [navigationEntry]).suffix(100))
+        restoreNavigation(entry)
+    }
+    private func restoreNavigation(_ entry: LibraryNavigationEntry) {
+        restoringNavigation = true
+        defer { restoringNavigation = false }
+        resetPage(entry.route)
+        parsedSearchText = entry.phrase; searchText = entry.phrase; filters = entry.filters
+        sourceFilter = entry.sourceFilter; sortOrder = entry.sortOrder; cleanupName = entry.cleanupName
+        if let folder = entry.folder {
+            browser.navigate(folder, record: false)
+            if let search = entry.folderSearch { browser.restoreSearch(search) }
+            browser.filter = entry.folderFilter
+        }
+        switch entry.panel {
+        case .connections: browser.showConnections = true
+        case .index: browser.showIndex = true
+        case .search: browser.showSearch = true
+        case .cleanup: browser.showCleanup = true
+        case nil: break
+        }
+        if entry.route == .search { searchOCR() }
+    }
+    private func resetPage(_ destination: LibraryRoute) {
+        let wasRestoring = restoringNavigation
+        restoringNavigation = true
+        defer { restoringNavigation = wasRestoring }
+        dismissPriorPages(); searchTask?.cancel(); ocrToken = UUID(); searchingText = false; ocrMatches = []
+        route = destination; parsedSearchText = ""; searchText = ""; filters = LibraryQuery(); selected = []; previewURL = nil
+        cleanupReview = false; cleanupSelection = []; sourceFilter = ""
+    }
+    func show(_ destination: LibraryRoute) {
+        if route != destination || browser.activePanel != nil || !searchText.isEmpty || !sourceFilter.isEmpty { recordNavigation() }
+        resetPage(destination)
+    }
+    func search(_ phrase: String, record: Bool = true) {
         let phrase = String(phrase.prefix(500))
+        if record && (route != .search || phrase != parsedSearchText || browser.activePanel != nil) { recordNavigation() }
+        else if !restoringNavigation && phrase != parsedSearchText { forwardHistory = [] }
         parsedSearchText = phrase
         dismissPriorPages(); sourceFilter = ""
         searchText = phrase; filters = LibraryQuery.parse(phrase); if filters.folder == "downloads" { filters.folder = settings.downloadsPath }; route = .search; previewURL = nil; selected = []
         searchOCR()
     }
-    func searchTextChanged(_ phrase: String) { if phrase != parsedSearchText { search(phrase) } }
+    func searchTextChanged(_ phrase: String) { if phrase != parsedSearchText { search(phrase, record: route != .search) } }
     func searchOCR() {
         searchTask?.cancel(); let token = UUID(); ocrToken = token; ocrMatches = []; searchingText = false
         let text = filters.text
@@ -361,20 +486,20 @@ final class LibraryModel: ObservableObject {
         }
     }
     func openSaved(_ saved: LibrarySavedSearch) {
+        let fresh = LibraryQuery.parse(saved.phrase)
+        var custom = saved.filters ?? fresh
+        if custom.dateLabel == fresh.dateLabel && custom.dateLabel != "Custom dates" { custom.from = fresh.from; custom.to = fresh.to }
+        if fresh.folder == "downloads", custom.folder != nil { custom.folder = settings.downloadsPath }
+        if route == .search && parsedSearchText == saved.phrase && (filters != custom || !sourceFilter.isEmpty) { recordNavigation() }
         search(saved.phrase)
-        if var custom = saved.filters {
-            let fresh = LibraryQuery.parse(saved.phrase)
-            if custom.dateLabel == fresh.dateLabel && custom.dateLabel != "Custom dates" { custom.from = fresh.from; custom.to = fresh.to }
-            if LibraryQuery.parse(saved.phrase).folder == "downloads", custom.folder != nil { custom.folder = settings.downloadsPath }
-            filters = custom; searchOCR()
-        }
+        filters = custom; searchOCR()
     }
     func transfer(_ values: [URL], move: Bool) {
         workspace.interaction.choose(move ? "Move files to a folder" : "Copy files to a folder", folder: true, starting: browser.location) { [weak self] target in
             if let target { self?.browser.transfer(values, to: target, move: move) }
         }
     }
-    func openFolder(_ url: URL) { show(.folder); browser.navigate(url) }
+    func openFolder(_ url: URL) { browser.navigate(url) }
     func preview(_ url: URL) {
         guard !FileAvailability.isOnlineOnly(url) else { status = "Online-only file skipped. MacEx does not download it automatically."; return }
         previewURL = url; transcriptToken = UUID(); transcript = ""; selectText = false
@@ -473,4 +598,15 @@ final class LibraryModel: ObservableObject {
         } catch { status = error.localizedDescription }
     }
     func shutdown() { scanControl?.cancel(); watcher = nil; timer?.invalidate(); refreshTask?.cancel(); searchTask?.cancel(); workspace.localIndex.shutdown(); remote?.cancel(); remote?.clearPreview(synchronous: true); player.pause(); if let playerObserver { player.removeTimeObserver(playerObserver); self.playerObserver = nil }; if let endObserver { NotificationCenter.default.removeObserver(endObserver); self.endObserver = nil } }
+}
+
+@MainActor final class PlaybackClock: ObservableObject {
+    @Published private(set) var position = 0.0
+    @Published private(set) var length = 0.0
+    func update(position: Double, length: Double) {
+        let position = position.isFinite ? position : 0, length = length.isFinite ? length : 0
+        // Publish only visible changes (whole seconds on the label); the slider tolerates this granularity.
+        if Int(position) != Int(self.position) || abs(position - self.position) > 0.9 { self.position = position }
+        if length != self.length { self.length = length }
+    }
 }

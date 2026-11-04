@@ -9,11 +9,21 @@ struct SidebarPlace: Identifiable {
     let url: URL
 }
 
+struct BrowserSearchContext: Equatable {
+    enum Engine { case spotlight, scan, localIndex }
+    var request: SearchRequest
+    var engine: Engine
+}
+
+enum BrowserPanel { case connections, index, search, cleanup }
+
 @MainActor
 final class BrowserModel: ObservableObject {
     let id: UUID
     let workspace: AppWorkspace
     var stateChanged: (() -> Void)?
+    var navigationRequested: ((URL, BrowserSearchContext?) -> Void)?
+    var panelRequested: (() -> Void)?
     var previewRequested: ((URL) -> Void)?
     var quickLook: (() -> Void)?
     var previewSelectionChanged: (() -> Void)?
@@ -22,8 +32,17 @@ final class BrowserModel: ObservableObject {
     @Published var dropHint: String?
     @Published var isVisible = true
     @Published var location: URL
-    @Published var entries: [FileEntry] = []
-    @Published var selection: Set<URL> = [] { didSet { previewSelectionChanged?() } }
+    @Published var entries: [FileEntry] = [] { didSet { if oldValue != entries { entriesRevision &+= 1 } } }
+    private(set) var entriesRevision = 0
+    /// Deliberately not @Published: it changes on every click, and publishing it re-rendered the whole window
+    /// (sidebar, toolbar, pages) per click. The file views and the status bar subscribe to `selectionChanges`.
+    var selection: Set<URL> = [] {
+        didSet {
+            guard selection != oldValue else { return }
+            selectionChanges.send(selection); previewSelectionChanged?()
+        }
+    }
+    let selectionChanges = PassthroughSubject<Set<URL>, Never>()
     @Published var filter = "" { didSet { applyFilter(); stateChanged?() } }
     @Published var sort: FileSort = .name { didSet { applyFilter(); stateChanged?() } }
     @Published var showFileAccess = false
@@ -41,11 +60,19 @@ final class BrowserModel: ObservableObject {
     var jobAction: FileAction? { workspace.jobs.action }
     var summary: JobSummary? { workspace.jobs.summary }
     @Published var showingOperations = false
-    @Published var showConnections = false
+    @Published var showConnections = false { willSet { if newValue != showConnections { panelRequested?() } } }
     @Published var connectionDraft: SFTPConnection?
-    @Published var showCleanup = false
-    @Published var showSearch = false
-    @Published var showIndex = false
+    @Published var showCleanup = false { willSet { if newValue != showCleanup { panelRequested?() } } }
+    @Published var showSearch = false { willSet { if newValue != showSearch { panelRequested?() } } }
+    @Published var showIndex = false { willSet { if newValue != showIndex { panelRequested?() } } }
+    private(set) var searchContext: BrowserSearchContext?
+    var activePanel: BrowserPanel? {
+        if showConnections { return .connections }
+        if showIndex { return .index }
+        if showSearch { return .search }
+        if showCleanup { return .cleanup }
+        return nil
+    }
     @Published var searchFields = SearchFields()
     @Published var searchActive = false
     @Published var searchRunning = false
@@ -119,8 +146,9 @@ final class BrowserModel: ObservableObject {
     }
 
     func navigate(_ url: URL, record: Bool = true) {
-        endSearchListing()
         let target = url.resolvingSymlinksInPath().standardizedFileURL
+        if record { navigationRequested?(target, nil) }
+        endSearchListing()
         if record && target != location { backHistory = Array((backHistory + [location]).suffix(30)); forwardHistory = [] }
         location = target
         filter = ""; selection = []; allEntries = []; entries = []
@@ -147,7 +175,13 @@ final class BrowserModel: ObservableObject {
                     }
                 }
                 guard generation == token else { return }
-                allEntries = result; applyFilter(); isLoading = false
+                // Filter and sort the full listing off the main thread; clicks and scrolling stay responsive in huge folders.
+                let options = filterOptions
+                let visible = await Task.detached(priority: .userInitiated) { Self.visibleEntries(result, options) }.value
+                guard generation == token else { return }
+                allEntries = result
+                if options == filterOptions { setVisible(visible) } else { applyFilter() }
+                isLoading = false
                 if let revealAfterLoad {
                     if entries.contains(where: { $0.url == revealAfterLoad }) { selection = [revealAfterLoad] }
                     self.revealAfterLoad = nil
@@ -171,11 +205,25 @@ final class BrowserModel: ObservableObject {
             guard !Task.isCancelled else { return }; self?.reload()
         }
     }
-    private func applyFilter() {
-        entries = DirectoryReader.sorted(allEntries.filter {
-            (searchActive || showHidden || !$0.isHidden) && (searchActive || filter.isEmpty || $0.name.localizedStandardContains(filter))
-        }, by: sort, ascending: ascending, foldersFirst: foldersFirst)
-        selection.formIntersection(Set(entries.map(\.url)))
+    struct FilterOptions: Equatable, Sendable {
+        var searchActive: Bool, showHidden: Bool, filter: String, sort: FileSort, ascending: Bool, foldersFirst: Bool
+    }
+    private var filterOptions: FilterOptions {
+        FilterOptions(searchActive: searchActive, showHidden: showHidden, filter: filter, sort: sort, ascending: ascending, foldersFirst: foldersFirst)
+    }
+    nonisolated static func visibleEntries(_ all: [FileEntry], _ options: FilterOptions) -> [FileEntry] {
+        DirectoryReader.sorted(all.filter {
+            (options.searchActive || options.showHidden || !$0.isHidden) && (options.searchActive || options.filter.isEmpty || $0.name.localizedStandardContains(options.filter))
+        }, by: options.sort, ascending: options.ascending, foldersFirst: options.foldersFirst)
+    }
+    private func applyFilter() { setVisible(Self.visibleEntries(allEntries, filterOptions)) }
+    private func setVisible(_ visible: [FileEntry]) {
+        entries = visible
+        if !selection.isEmpty {
+            let present = Set(visible.lazy.map(\.url))
+            let kept = selection.intersection(present)
+            if kept != selection { selection = kept }
+        }
     }
 
     func openSelection() { for entry in selected { open(entry) } }
@@ -186,11 +234,21 @@ final class BrowserModel: ObservableObject {
             if entry.identity.isSymbolicLink { target = target.resolvingSymlinksInPath() }
             let values = try target.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
             if values.isDirectory == true && values.isPackage != true { navigate(target); return }
-            guard !FileAvailability.isOnlineOnly(target) else { errorMessage = "This file is online only. MacEx skips it to avoid downloading its contents."; return }
-            selection = [target]; showPreview = true; previewRequested?(target)
-        } catch { errorMessage = "Cannot preview \(entry.name): \(error.localizedDescription)" }
+            selection = [target]
+            NSWorkspace.shared.open(target)
+        } catch { errorMessage = "Cannot open \(entry.name): \(error.localizedDescription)" }
     }
-    func openWith(_ application: URL? = nil) { openSelection() }
+    /// Shows the file in MacEx's own preview pane instead of handing it to another app.
+    func preview(_ entry: FileEntry) {
+        guard !entry.isFolder else { open(entry); return }
+        guard !FileAvailability.isOnlineOnly(entry.url) else { errorMessage = "This file is online only. MacEx skips it to avoid downloading its contents."; return }
+        selection = [entry.url]; showPreview = true; previewRequested?(entry.url)
+    }
+    func openWith(_ application: URL? = nil) {
+        let files = selected.filter { !$0.isFolder }.map(\.url)
+        guard let application, !files.isEmpty else { openSelection(); return }
+        NSWorkspace.shared.open(files, withApplicationAt: application, configuration: NSWorkspace.OpenConfiguration())
+    }
     func pinCurrentFolder() { workspace.pin(location) }
     func pinSelectedFolders() { for entry in selected where entry.isFolder { workspace.pin(entry.url) } }
     func openShortcut(_ shortcut: SidebarShortcut) {
@@ -291,7 +349,10 @@ final class BrowserModel: ObservableObject {
     }
     func searchLocalIndex(_ request: SearchRequest) {
         guard let store = workspace.localIndex.store else { errorMessage = "Local index is unavailable."; return }
+        let context = BrowserSearchContext(request: request, engine: .localIndex)
+        navigationRequested?(URL(fileURLWithPath: request.scope, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL, context)
         useSearchScope(request)
+        searchContext = context
         showIndexedResults([], summary: "Searching committed local OCR checkpoints…")
         searchRunning = true; let token = searchToken
         Task {
@@ -306,13 +367,19 @@ final class BrowserModel: ObservableObject {
     func scan(_ request: SearchRequest) { beginSearch(request, scan: true) }
     func rescan() { if let activeRequest { scan(activeRequest) } }
     func runSavedSearch(_ search: SavedSearch) {
-        let url = URL(fileURLWithPath: search.request.scope, isDirectory: true)
-        if url.standardizedFileURL != location.standardizedFileURL { navigate(url) }
         searchSpotlight(search.request)
     }
     func clearSearch() {
+        if searchActive { navigationRequested?(location, nil) }
         endSearchListing()
         reload()
+    }
+    func restoreSearch(_ context: BrowserSearchContext) {
+        switch context.engine {
+        case .spotlight: searchSpotlight(context.request)
+        case .scan: scan(context.request)
+        case .localIndex: searchLocalIndex(context.request)
+        }
     }
     func cancelSearch() {
         searchToken = UUID(); spotlight.cancel(); searchControl?.cancel()
@@ -322,7 +389,6 @@ final class BrowserModel: ObservableObject {
     func revealInEnclosingFolder() {
         guard searchActive, selection.count == 1, let url = selection.first else { return }
         let parent = url.deletingLastPathComponent()
-        endSearchListing()
         navigate(parent)
         revealAfterLoad = url
     }
@@ -333,11 +399,14 @@ final class BrowserModel: ObservableObject {
     }
     private func useSearchScope(_ request: SearchRequest) {
         if SearchScope.canonicalPath(request.scope) != SearchScope.canonicalPath(location.path) {
-            navigate(URL(fileURLWithPath: request.scope, isDirectory: true))
+            navigate(URL(fileURLWithPath: request.scope, isDirectory: true), record: false)
         }
     }
     private func beginSearch(_ request: SearchRequest, scan: Bool) {
+        let context = BrowserSearchContext(request: request, engine: scan ? .scan : .spotlight)
+        navigationRequested?(URL(fileURLWithPath: request.scope, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL, context)
         useSearchScope(request)
+        searchContext = context
         loadControl?.cancel(); generation = UUID(); isLoading = false
         watcher = nil; refreshTask?.cancel(); errorMessage = nil
         activeRequest = request
@@ -388,6 +457,7 @@ final class BrowserModel: ObservableObject {
         searchSummary = coverage.summary(matches: entries.count, cancelled: false, reachedLimit: false)
     }
     private func endSearchListing() {
+        searchContext = nil
         searchToken = UUID()
         spotlight.cancel(); searchControl?.cancel()
         searchActive = false

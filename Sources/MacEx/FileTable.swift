@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 import MacExCore
@@ -12,9 +13,10 @@ struct FileTable: NSViewRepresentable {
         table.model = model; table.coordinator = context.coordinator
         table.delegate = context.coordinator; table.dataSource = context.coordinator
         table.allowsMultipleSelection = true; table.allowsEmptySelection = true
-        table.rowHeight = 35; table.intercellSpacing = NSSize(width: 16, height: 0)
-        table.style = .fullWidth; table.usesAlternatingRowBackgroundColors = false
-        table.backgroundColor = .textBackgroundColor
+        table.rowHeight = 34; table.intercellSpacing = NSSize(width: 14, height: 2)
+        table.style = .inset; table.usesAlternatingRowBackgroundColors = false
+        table.backgroundColor = Theme.canvasNS; table.gridStyleMask = []
+        scroll.drawsBackground = true; scroll.backgroundColor = Theme.canvasNS; scroll.borderType = .noBorder
         table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         let columns: [(String, String, CGFloat)] = [("name", "Name", 310), ("modified", "Date Modified", 155), ("size", "Size", 90), ("kind", "Kind", 140)]
         for (key, title, width) in columns {
@@ -24,7 +26,7 @@ struct FileTable: NSViewRepresentable {
             column.sortDescriptorPrototype = NSSortDescriptor(key: key, ascending: true)
             table.addTableColumn(column)
         }
-        table.target = context.coordinator; table.doubleAction = #selector(Coordinator.openClicked)
+        table.target = context.coordinator
         context.coordinator.updating = true
         let key = model.sort == .name ? "name" : model.sort == .modified ? "modified" : model.sort == .size ? "size" : "kind"
         table.sortDescriptors = [NSSortDescriptor(key: key, ascending: model.ascending)]
@@ -36,20 +38,19 @@ struct FileTable: NSViewRepresentable {
         table.setDraggingSourceOperationMask([.copy, .move], forLocal: false)
         scroll.documentView = table
         context.coordinator.table = table
+        context.coordinator.observeSelection()
         return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let table = scroll.documentView as? BrowserTable else { return }
         let coordinator = context.coordinator
-        if coordinator.entries != model.entries {
+        var reloaded = false
+        if coordinator.revision != model.entriesRevision {
             coordinator.updating = true
-            coordinator.entries = model.entries; table.reloadData()
-            coordinator.updating = false
+            coordinator.entries = model.entries; coordinator.revision = model.entriesRevision; table.reloadData()
+            coordinator.updating = false; reloaded = true
         }
-        let indices = IndexSet(model.entries.indices.filter { model.selection.contains(model.entries[$0].url) })
-        if table.selectedRowIndexes != indices {
-            coordinator.updating = true; table.selectRowIndexes(indices, byExtendingSelection: false); coordinator.updating = false
-        }
+        if reloaded { coordinator.apply(model.selection) }
         let key = model.sort == .name ? "name" : model.sort == .modified ? "modified" : model.sort == .size ? "size" : "kind"
         if table.sortDescriptors.first?.key != key || table.sortDescriptors.first?.ascending != model.ascending {
             coordinator.updating = true
@@ -62,12 +63,26 @@ struct FileTable: NSViewRepresentable {
         let model: BrowserModel
         weak var table: BrowserTable?
         var entries: [FileEntry] = []
+        var revision = -1
         var updating = false
         var icons: [String: NSImage] = [:]
         let dateFormatter: DateFormatter = {
             let formatter = DateFormatter(); formatter.dateStyle = .medium; formatter.timeStyle = .short; formatter.doesRelativeDateFormatting = true; return formatter
         }()
+        private var selectionObserver: AnyCancellable?
         init(_ model: BrowserModel) { self.model = model }
+        func observeSelection() {
+            selectionObserver = model.selectionChanges.sink { [weak self] in self?.apply($0) }
+        }
+        /// Mirrors a model selection into the table. Changes that came from the table itself are already in place and cost nothing.
+        func apply(_ wanted: Set<URL>) {
+            guard let table else { return }
+            let current = Set(table.selectedRowIndexes.compactMap { entries.indices.contains($0) ? entries[$0].url : nil })
+            guard current != wanted else { return }
+            let indices = IndexSet(entries.indices.filter { wanted.contains(entries[$0].url) })
+            updating = true; table.selectRowIndexes(indices, byExtendingSelection: false); updating = false
+            if indices.count == 1, let row = indices.first { table.scrollRowToVisible(row) }
+        }
         func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
             guard !model.busy, entries.indices.contains(row) else { return nil }; return entries[row].url as NSURL
@@ -111,7 +126,7 @@ struct FileTable: NSViewRepresentable {
                 cell.textField?.stringValue = entry.name
                 cell.textField?.textColor = entry.isHidden ? .secondaryLabelColor : .labelColor
                 if entry.isFolder {
-                    cell.imageView?.image = NSWorkspace.shared.icon(for: UTType.folder)
+                    cell.imageView?.image = FolderArt.image
                     cell.imageView?.contentTintColor = nil
                 } else if entry.identity.isSymbolicLink {
                     cell.imageView?.image = NSImage(systemSymbolName: "link", accessibilityDescription: "Symbolic link")
@@ -131,6 +146,11 @@ struct FileTable: NSViewRepresentable {
             cell.toolTip = entry.url.path + (column.identifier.rawValue == "size" && entry.size == nil ? "\nFolder size is not calculated." : "")
             return cell
         }
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+            let id = NSUserInterfaceItemIdentifier("browser-row")
+            if let view = tableView.makeView(withIdentifier: id, owner: nil) as? BrowserRowView { view.hovered = false; return view }
+            let view = BrowserRowView(); view.identifier = id; return view
+        }
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard !updating, let table else { return }
             model.selection = Set(table.selectedRowIndexes.compactMap { entries.indices.contains($0) ? entries[$0].url : nil })
@@ -139,7 +159,7 @@ struct FileTable: NSViewRepresentable {
             guard !updating, let descriptor = tableView.sortDescriptors.first else { return }
             model.ascending = descriptor.ascending
             model.sort = descriptor.key == "modified" ? .modified : descriptor.key == "size" ? .size : descriptor.key == "kind" ? .kind : .name
-            entries = model.entries
+            entries = model.entries; revision = model.entriesRevision
             tableView.reloadData()
         }
         @objc func openClicked() { guard let table, entries.indices.contains(table.clickedRow) else { return }; model.open(entries[table.clickedRow]) }
@@ -163,7 +183,35 @@ struct FileTable: NSViewRepresentable {
         super.viewDidMoveToWindow()
         if !receivedFocus, let window { window.makeFirstResponder(self); receivedFocus = true }
     }
+    private var hoverRow = -1
+    private var tracking: NSTrackingArea?
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area); tracking = area
+    }
+    override func mouseMoved(with event: NSEvent) { setHover(row(at: convert(event.locationInWindow, from: nil))) }
+    override func mouseExited(with event: NSEvent) { setHover(-1) }
+    private func setHover(_ row: Int) {
+        guard row != hoverRow else { return }
+        let old = hoverRow; hoverRow = row
+        for index in [old, row] where index >= 0 && index < numberOfRows { (rowView(atRow: index, makeIfNecessary: false) as? BrowserRowView)?.hovered = index == row }
+    }
+    /// Clicks act immediately even when MacEx is in the background (e.g. right after opening a file in another app).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    /// Double-clicks are handled on mouse-down, before NSTableView's drag-tracking loop can consume the event.
+    override func mouseDown(with event: NSEvent) {
+        let row = row(at: convert(event.locationInWindow, from: nil))
+        if event.clickCount == 2, row >= 0, let model, let coordinator, coordinator.entries.indices.contains(row),
+           event.modifierFlags.intersection([.command, .shift, .control]).isEmpty {
+            model.open(coordinator.entries[row]); return
+        }
+        super.mouseDown(with: event)
+    }
     override func keyDown(with event: NSEvent) {
+        // ⌘O and ⌘↓ open, matching Finder.
+        if event.modifierFlags.intersection([.command, .control, .option]) == .command, event.keyCode == 31 || event.keyCode == 125 { model?.openSelection(); return }
         if event.keyCode == 49 && event.modifierFlags.intersection([.command, .control, .option]).isEmpty { model?.quickLook?(); return }
         if (event.keyCode == 36 || event.keyCode == 76) && event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
             model?.rename(); return
@@ -180,5 +228,31 @@ struct FileTable: NSViewRepresentable {
         if row < 0 { deselectAll(nil) }
         guard let model else { return nil }
         menuActions = FileMenuActions(model); return menuActions?.menu()
+    }
+}
+
+/// Rounded selection and a soft hover plate; both fade instead of snapping.
+@MainActor final class BrowserRowView: NSTableRowView {
+    var hovered = false { didSet { if hovered != oldValue { animateRefresh() } } }
+    override var isSelected: Bool { didSet { if isSelected != oldValue { animateRefresh() } } }
+    private let plate = CALayer()
+    override init(frame: NSRect) {
+        super.init(frame: frame); wantsLayer = true
+        plate.cornerRadius = 8; plate.cornerCurve = .continuous; layer?.addSublayer(plate)
+    }
+    required init?(coder: NSCoder) { nil }
+    override func layout() { super.layout(); CATransaction.begin(); CATransaction.setDisableActions(true); plate.frame = bounds.insetBy(dx: 6, dy: 1); CATransaction.commit() }
+    override func drawSelection(in dirtyRect: NSRect) {}
+    override func drawBackground(in dirtyRect: NSRect) {}
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); animateRefresh(animated: false) }
+    private func animateRefresh(animated: Bool = true) {
+        var color: NSColor = .clear
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = isSelected ? Theme.selectionNS : hovered ? Theme.hoverNS : .clear
+            plate.backgroundColor = nil
+            let cg = color.cgColor
+            CATransaction.begin(); CATransaction.setAnimationDuration(animated ? 0.14 : 0); plate.backgroundColor = cg; CATransaction.commit()
+        }
     }
 }

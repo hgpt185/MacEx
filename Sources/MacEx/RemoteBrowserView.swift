@@ -32,18 +32,21 @@ struct RemoteBrowserView: View {
             Table(model.visibleEntries, selection: $model.selection) {
                 TableColumn("Name") { entry in
                     Label(entry.name, systemImage: entry.isDirectory ? "folder" : entry.isLink ? "link" : "doc")
-                        .onTapGesture(count: 2) { model.selection = [entry.id]; model.openSelected() }
                 }.width(min: 250, ideal: 350)
                 TableColumn("Kind") { Text($0.kind) }.width(100)
                 TableColumn("Size") { entry in Text(entry.size.map { ByteCountFormatter.string(fromByteCount: Int64(clamping: $0), countStyle: .file) } ?? "—") }.width(110)
                 TableColumn("Modified") { entry in Text(entry.modified?.formatted(date: .abbreviated, time: .shortened) ?? "—") }.width(180)
                 TableColumn("Permissions") { entry in Text(entry.permissions.map { String($0 & 0o7777, radix: 8) } ?? "—") }.width(90)
             }.accessibilityIdentifier("remote-file-list")
-                .contextMenu {
+                .contextMenu(forSelectionType: String.self, menu: { _ in
                     Button("Open / Preview", action: model.openSelected).disabled(model.selected == nil || model.busy)
                     Button("Download…", action: model.download).disabled(model.selected?.isRegular != true || model.busy)
                     Button("Rename…", action: model.rename).disabled(model.selected == nil || model.busy)
-                }
+                }, primaryAction: { ids in
+                    // Double-click opens; the Table keeps owning single-click selection.
+                    guard let id = ids.first else { return }
+                    model.selection = [id]; model.openSelected()
+                })
             Divider()
             HStack(alignment: .top) {
                 if model.busy { ProgressView().controlSize(.small) }
