@@ -71,6 +71,8 @@ struct SingleWindowView: View {
             }
             .animation(Theme.snappy, value: model.sidebarVisible)
             .animation(Theme.snappy, value: model.previewURL != nil || model.inspector)
+            // Files under an in-window overlay must not start drags through it.
+            .environment(\.fileDragEnabled, !browser.showingOperations && !model.cleanupReview && interaction.request == nil)
             if browser.showingOperations { operationsOverlay.transition(.move(edge: .top).combined(with: .opacity)) }
             if model.cleanupReview { reviewOverlay }
             InAppInteractionView(model: interaction)
@@ -428,7 +430,10 @@ struct SingleWindowView: View {
         let clicks = ClickSelection(selection: $model.selected, anchor: $clickAnchor, order: row.map(\.path)) { _ in FileOpener.open(item.url) }
         return LibraryTile(item: item, selected: model.selected.contains(item.path), size: 150)
             .onTapGesture { clicks.click(item.path) }
-            .modifier(LibraryDragItem(url: item.url))
+            .modifier(LibraryDragItem {
+                guard model.selected.contains(item.path), model.selected.count > 1 else { model.selected = [item.path]; clickAnchor = item.path; return [item.url] }
+                return model.selected.sorted().map { URL(fileURLWithPath: $0) }
+            })
             .rightClickMenu(select: { if !model.selected.contains(item.path) { model.selected = [item.path] } }, entries: { itemMenu(item) })
     }
     private var folderPage: some View {
@@ -441,7 +446,6 @@ struct SingleWindowView: View {
                 ToolbarIconButton(symbol: "pin", help: "Pin Folder") { browser.pinCurrentFolder() }
                 viewControls
             }.padding(.horizontal, 18).padding(.top, 4).padding(.bottom, 10)
-            Text(browser.location.lastPathComponent).font(.system(size: 1)).opacity(0).frame(height: 0).accessibilityIdentifier("folder-title")
             if let error = browser.errorMessage { Text(error).foregroundStyle(.orange).font(.caption).padding(.horizontal, 22).padding(.bottom, 6) }
             Group { if browser.viewMode == .list { FileTable(model: browser) } else { FileIcons(model: browser) } }
                 .transition(.opacity)
@@ -467,14 +471,20 @@ struct SingleWindowView: View {
             ForEach(Array(shown.enumerated()), id: \.element) { index, url in
                 let last = index == shown.count - 1
                 if index > 0 || clipped { Image(systemName: "chevron.compact.right").font(.system(size: 11)).foregroundStyle(.quaternary) }
-                Button { if !last { browser.navigate(url) } } label: {
+                let name = url.path == "/" ? "Macintosh HD" : url.lastPathComponent
+                if last {
+                    // The current folder is the page title: plain text (not a button), so it reads as the heading.
                     HStack(spacing: 5) {
-                        if last { Image(nsImage: FolderArt.image).resizable().frame(width: 16, height: 16) }
-                        Text(url.path == "/" ? "Macintosh HD" : url.lastPathComponent)
-                            .font(.system(size: last ? 15 : 13, weight: last ? .semibold : .regular))
-                            .foregroundStyle(last ? .primary : .secondary).lineLimit(1).fixedSize()
-                    }.padding(.horizontal, 6).padding(.vertical, 4).contentShape(Rectangle())
-                }.buttonStyle(CrumbStyle()).disabled(last).help(url.path)
+                        Image(nsImage: FolderArt.image).resizable().frame(width: 16, height: 16).accessibilityHidden(true)
+                        Text(name).font(.system(size: 15, weight: .semibold)).lineLimit(1).fixedSize()
+                            .accessibilityIdentifier("folder-title").accessibilityAddTraits(.isHeader)
+                    }.padding(.horizontal, 6).padding(.vertical, 4).help(url.path)
+                } else {
+                    Button { browser.navigate(url) } label: {
+                        Text(name).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                            .padding(.horizontal, 6).padding(.vertical, 4).contentShape(Rectangle())
+                    }.buttonStyle(CrumbStyle()).help(url.path)
+                }
             }
         }
     }
@@ -653,11 +663,19 @@ struct SingleWindowView: View {
     private func bytes(_ value: Int64) -> String { ByteCountFormatter.string(fromByteCount: value, countStyle: .file) }
 }
 
-/// Per-item file drag. The macOS 26 drag-container APIs were removed here: they took over mouse handling, so
-/// taps on tiles and on empty space were swallowed or reinterpreted.
+/// File drag for a library row or tile. `urls` runs when the drag starts and returns every file to carry: the whole
+/// selection when the item is part of it, otherwise just the item (which it selects, as Finder does).
+/// The drag itself is AppKit's (see `FileDragSourceView`). The macOS 26 drag-container APIs are not used: they took
+/// over mouse handling, so taps on tiles and on empty space were swallowed.
 struct LibraryDragItem: ViewModifier {
-    let url: URL
-    func body(content: Content) -> some View { content.onDrag { NSItemProvider(object: url as NSURL) } }
+    let urls: () -> [URL]
+    func body(content: Content) -> some View {
+        // `.onDrag` stays only because it makes the item accept the first click in an inactive window (it selects at
+        // once, as in Finder). `FileDragMonitor` consumes every drag event after a press on a file, so SwiftUI never
+        // starts its single-file drag; the multi-file AppKit drag starts instead.
+        content.onDrag { NSItemProvider(object: (urls().first ?? URL(fileURLWithPath: "/")) as NSURL) }
+            .overlay(FileDragSource(urls: urls))
+    }
 }
 /// Kept as a no-op so call sites stay simple; see `LibraryDragItem`.
 struct LibraryDragContainer: ViewModifier {

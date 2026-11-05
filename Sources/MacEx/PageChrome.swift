@@ -104,6 +104,8 @@ struct HeaderButton: View {
     }
     func click(_ id: String) {
         TapLedger.mark()
+        // The press became a file drag; its mouse-up is not a click (it would collapse the dragged selection).
+        if FileDragMonitor.shared.draggedThisPress { return }
         if Self.isDoubleClick(id) { selection = [id]; anchor = id; open(id); return }
         let flags = NSEvent.modifierFlags
         if flags.contains(.command) {
@@ -233,6 +235,11 @@ struct LibraryFileBrowser: View {
     private func selectForMenu(_ item: LibraryFile) {
         if !selection.contains(item.path) { selection = [item.path]; anchor = item.path }
     }
+    /// Dragging a selected file carries the whole selection, in list order; dragging any other file selects and carries just it.
+    private func dragURLs(_ item: LibraryFile) -> [URL] {
+        guard selection.contains(item.path), selection.count > 1 else { selection = [item.path]; anchor = item.path; return [item.url] }
+        return items.filter { selection.contains($0.path) }.map(\.url)
+    }
     var body: some View {
         let clicks = ClickSelection(selection: $selection, anchor: $anchor, order: items.map(\.path)) { path in
             if let item = items.first(where: { $0.path == path }) { open(item) }
@@ -245,7 +252,7 @@ struct LibraryFileBrowser: View {
                             LibraryTile(item: item, selected: selection.contains(item.path), size: tileSize)
                                 .marqueeItem(item.path)
                                 .onTapGesture { clicks.click(item.path) }
-                                .modifier(LibraryDragItem(url: item.url))
+                                .modifier(LibraryDragItem { dragURLs(item) })
                                 .rightClickMenu(select: { selectForMenu(item) }, entries: { menu(item) })
                         }
                     }.padding(.horizontal, 20).padding(.vertical, 14)
@@ -259,7 +266,7 @@ struct LibraryFileBrowser: View {
                                 LibraryFileRow(item: item, selected: selection.contains(item.path), showsSource: showsSource)
                                     .marqueeItem(item.path)
                                     .onTapGesture { clicks.click(item.path) }
-                                    .modifier(LibraryDragItem(url: item.url))
+                                    .modifier(LibraryDragItem { dragURLs(item) })
                                     .rightClickMenu(select: { selectForMenu(item) }, entries: { menu(item) })
                             }
                         } header: {
@@ -487,4 +494,103 @@ final class EmptyClickWatcherView: NSView {
 
 private extension NSPoint {
     func clamped(to rect: NSRect) -> NSPoint { NSPoint(x: min(max(x, rect.minX), rect.maxX), y: min(max(y, rect.minY), rect.maxY)) }
+}
+
+// MARK: Multi-file drag for SwiftUI rows and tiles
+
+/// Passive per-item drag source; see `FileDragSourceView`.
+struct FileDragSource: NSViewRepresentable {
+    let urls: () -> [URL]
+    @Environment(\.fileDragEnabled) private var enabled
+    func makeNSView(context: Context) -> FileDragSourceView { FileDragSourceView() }
+    func updateNSView(_ view: FileDragSourceView, context: Context) { view.urls = enabled ? urls : nil }
+}
+extension EnvironmentValues {
+    /// False while an in-window overlay (review, operations, folder picker) covers the files.
+    @Entry var fileDragEnabled = true
+}
+
+/// Covers one row or tile but never takes hits, so clicks, double-clicks, hover, right-click menus and empty-space
+/// clicks keep reaching SwiftUI exactly as before. `FileDragMonitor` watches the mouse instead and starts an AppKit
+/// dragging session from this view only after a press on it moves 4 pt, carrying every URL `urls` returns.
+final class FileDragSourceView: NSView, NSDraggingSource {
+    var urls: (() -> [URL])?
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { FileDragMonitor.shared.register(self) } else { FileDragMonitor.shared.unregister(self) }
+    }
+    /// Same operations as the folder views: copy by default, move when the destination asks for it.
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { [.copy, .move] }
+    func beginDrag(_ urls: [URL], event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let items = urls.enumerated().map { index, url in
+            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+            let icon = NSWorkspace.shared.icon(forFile: url.path)
+            // Stack the icons slightly under the pointer, Finder-style; deep stacks share one offset.
+            let offset = CGFloat(min(index, 4)) * 4
+            item.setDraggingFrame(NSRect(x: point.x - 24 + offset, y: point.y - 24 - offset, width: 48, height: 48), contents: icon)
+            return item
+        }
+        let session = beginDraggingSession(with: items, event: event, source: self)
+        session.draggingFormation = .pile
+    }
+}
+
+/// One local monitor for every visible `FileDragSourceView`, installed while at least one is on screen.
+@MainActor final class FileDragMonitor {
+    static let shared = FileDragMonitor()
+    /// Starts the drag; tests replace it to record what would be dragged without a real dragging session.
+    var start: (FileDragSourceView, [URL], NSEvent) -> Void = { view, urls, event in view.beginDrag(urls, event: event) }
+    private let views = NSHashTable<FileDragSourceView>.weakObjects()
+    private var monitor: Any?
+    private var pressed: (view: FileDragSourceView, point: NSPoint)?
+    private var consuming = false
+    /// True from the moment a drag starts until the next press. The press's mouse-up still reaches SwiftUI, so its
+    /// gesture tracking finishes normally, but `ClickSelection` ignores the tap it may produce (macOS 15 does).
+    private(set) var draggedThisPress = false
+
+    func register(_ view: FileDragSourceView) {
+        views.add(view)
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
+            self?.handle(event) ?? event
+        }
+    }
+    func unregister(_ view: FileDragSourceView) {
+        views.remove(view)
+        if pressed?.view === view { pressed = nil }
+        if views.count == 0, let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil; consuming = false }
+    }
+    /// Returns nil for drag events that follow a press on a file, so SwiftUI never sees a drag it might also act on.
+    func handle(_ event: NSEvent) -> NSEvent? {
+        switch event.type {
+        case .leftMouseDown:
+            pressed = nil; consuming = false; draggedThisPress = false
+            // ⌃-click opens the context menu; it is never the start of a drag.
+            guard !event.modifierFlags.contains(.control), let view = source(at: event) else { return event }
+            pressed = (view, event.locationInWindow); consuming = true
+        case .leftMouseDragged:
+            // Every drag event from a press on a file until mouse-up is consumed, so SwiftUI's own single-file drag
+            // never starts. Under 4 pt the press still ends as a normal click.
+            guard consuming else { return event }
+            guard let press = pressed else { return nil }
+            guard hypot(event.locationInWindow.x - press.point.x, event.locationInWindow.y - press.point.y) >= 4 else { return nil }
+            pressed = nil
+            if let urls = press.view.urls?(), !urls.isEmpty { start(press.view, urls, event); draggedThisPress = true }
+            return nil
+        default:
+            pressed = nil; consuming = false
+        }
+        return event
+    }
+    private func source(at event: NSEvent) -> FileDragSourceView? {
+        views.allObjects.first { view in
+            // Sources without URLs are under an in-window overlay; presses there belong to the overlay.
+            guard view.urls != nil, view.window === event.window, !view.isHiddenOrHasHiddenAncestor else { return false }
+            // Bounds clipped by the enclosing scroll view, so rows scrolled out of sight never match. (visibleRect alone is
+            // not limited to the view's own bounds when clipsToBounds is off, the default since macOS 14.)
+            return view.bounds.intersection(view.visibleRect).contains(view.convert(event.locationInWindow, from: nil))
+        }
+    }
 }
