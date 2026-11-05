@@ -50,7 +50,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 - **Approach:** Update the selectors that changed: the sidebar has a Free Up Space row and no Duplicates row, Settings now has sections, and Connections has a new form. Run the suite with `zsh Scripts/test.sh`, using the sandboxed runner described in `docs/VERIFICATION.md`.
 - **Done when:** All UI tests pass locally and in CI.
 - **Risk:** The sandboxed runner needs fixture access; follow the existing fixture setup.
-- **Status (2026-11-06):** Fixed; waiting on a CI run to confirm. On `main`, 6 of 7 UI tests passed in CI. `testTextPreviewDoesNotLaunchAnotherWindow` failed because the redesign had replaced the visible folder title with an invisible zero-height text, which SwiftUI leaves out of accessibility. The current breadcrumb is now a plain heading with the `folder-title` identifier. The tests also pin the sidebar's Tools section open (`-sidebarToolsExpanded YES`), so a remembered collapsed state cannot hide Free Up Space. To run them locally, macOS Automation Mode must be enabled once (`automationmodetool`), which needs an administrator.
+- **Status (2026-11-06):** Mostly fixed. In CI on PR #1, 6 of 7 UI tests pass. `testAppearanceToggleSynchronizesSettingsAndSurvivesRelaunch` still fails: after the relaunch, the app draws normally but stops answering accessibility queries for 40+ s on the macOS 15 runner. It fails the same way on unchanged `main` (control run 42094011247), so it is pre-existing. It does not reproduce on macOS 27. **Next:** find the cause. On `main`, 6 of 7 UI tests passed in CI. `testTextPreviewDoesNotLaunchAnotherWindow` failed because the redesign had replaced the visible folder title with an invisible zero-height text, which SwiftUI leaves out of accessibility. The current breadcrumb is now a plain heading with the `folder-title` identifier. The tests also pin the sidebar's Tools section open (`-sidebarToolsExpanded YES`), so a remembered collapsed state cannot hide Free Up Space. To run them locally, macOS Automation Mode must be enabled once (`automationmodetool`), which needs an administrator.
 
 ### 4. Manual interaction checklist · S
 
@@ -279,7 +279,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 
 Each item becomes a GitHub issue titled `[Plan #N] <title>` and links back to this document. Tick the items off below as their PRs merge.
 
-- [x] 1 · [x] 2 · [ ] 3 (fixed; awaiting CI) · [x] 4 (written; first run pending) · [x] 5
+- [x] 1 · [x] 2 · [ ] 3 (6/7 UI tests pass; relaunch test open) · [x] 4 (written; first run pending) · [x] 5
 - [ ] 6 · [ ] 7 · [ ] 8 · [ ] 9 · [ ] 10 · [ ] 11 · [ ] 12 · [ ] 13
 - [ ] 14 · [ ] 15 · [ ] 16 · [ ] 17 · [ ] 18 · [ ] 19 · [ ] 20
 - [ ] 21 · [ ] 22 · [ ] 23
