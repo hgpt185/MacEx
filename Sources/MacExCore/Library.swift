@@ -90,30 +90,28 @@ public enum LibraryScanner {
         var items: [LibraryFile] = []; var seen = Set<String>(); var examined = 0; var skipped = 0; var complete = true
         let prior = Dictionary(previous.lazy.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         var issues: [LibraryCoverageIssue] = []; var limitReached = false
+        var pending: [Pending] = []
         func issue(_ url: URL, _ message: String) {
             complete = false; skipped += 1
             if issues.count < 40 { issues.append(LibraryCoverageIssue(path: url.path, message: message)) }
         }
         func stopped() -> Bool {
             if control.isCancelled { complete = false; return true }
-            if examined >= maxEntries || items.count >= maxItems { complete = false; limitReached = true; return true }
+            if examined >= maxEntries || items.count + pending.count >= maxItems { complete = false; limitReached = true; return true }
             return false
         }
-        func append(_ url: URL, identity: FileIdentity, package: Bool, values: URLResourceValues?) {
-            let md = MDItemCreate(nil, url.path as CFString)
-            func attribute(_ key: String) -> Any? { md.flatMap { MDItemCopyAttribute($0, key as CFString) } }
-            let from = attribute("kMDItemWhereFroms") as? [String] ?? []
-            let source = DownloadProvenance.source(url) ?? DownloadProvenance.normalizedSource(from)
-            let width = attribute("kMDItemPixelWidth") as? NSNumber, height = attribute("kMDItemPixelHeight") as? NSNumber
-            let kind = LibraryKind.classify(url, package: package)
-            let onlineOnly = FileAvailability.isOnlineOnly(url)
-            let imageMetadata = kind == .images && !onlineOnly ? LocalFileBytes.imageMetadata(url) : (nil, nil, nil)
-            items.append(LibraryFile(path: SearchScope.canonicalPath(url.path), name: url.lastPathComponent, kind: kind, bytes: identity.isRegular ? identity.size : 0,
-                modified: identity.modified, created: values?.creationDate, added: values?.addedToDirectoryDate, captured: imageMetadata.2 ?? attribute("kMDItemContentCreationDate") as? Date, lastUsed: attribute("kMDItemLastUsedDate") as? Date,
-                source: source, tags: values?.tagNames ?? [], camera: attribute("kMDItemAcquisitionModel") as? String ?? imageMetadata.1,
-                dimensions: width.flatMap { w in height.map { "\(w.intValue) × \($0.intValue)" } } ?? imageMetadata.0, duration: (attribute("kMDItemDurationSeconds") as? NSNumber)?.doubleValue,
-                package: package, onlineOnly: onlineOnly, screenshot: (attribute("kMDItemIsScreenCapture") as? NSNumber)?.boolValue == true || DownloadProvenance.isScreenshot(url), signature: LibraryFile.signature(identity)))
-            if items.count.isMultiple(of: 100) { progress?(items.count) }
+        // Files are recorded in enumeration order. Reused records and new files wait in `pending`; new files' metadata
+        // (Spotlight, xattrs, image headers) is read by a few workers at a time, then everything is appended in order.
+        func flush() {
+            guard !pending.isEmpty else { return }
+            let before = items.count
+            items.append(contentsOf: record(pending))
+            pending.removeAll(keepingCapacity: true)
+            if before / 100 != items.count / 100 { progress?(items.count) }
+        }
+        func enqueue(_ entry: Pending) {
+            pending.append(entry)
+            if pending.count >= batchSize { flush() }
         }
         let keys: Set<URLResourceKey> = [.isPackageKey, .creationDateKey, .addedToDirectoryDateKey, .tagNamesKey]
         if roots.count > maxRoots { limitReached = true; issue(roots[maxRoots], "The library reached its 24-folder limit.") }
@@ -125,7 +123,7 @@ public enum LibraryScanner {
             }
             let rootValues = try? root.resourceValues(forKeys: keys)
             if root.pathExtension.lowercased() == "app" || rootValues?.isPackage == true {
-                if seen.insert(SearchScope.canonicalPath(root.path)).inserted { examined += 1; append(root, identity: identity, package: true, values: rootValues) }
+                if seen.insert(SearchScope.canonicalPath(root.path)).inserted { examined += 1; enqueue(.fresh(root, identity, true, rootValues)) }
                 continue
             }
             if FileAvailability.isOnlineOnly(root) { issue(root, "Online-only folder was not downloaded."); continue }
@@ -141,8 +139,7 @@ public enum LibraryScanner {
                 guard seen.insert(path).inserted else { enumerator.skipDescendants(); continue }
                 guard let identity = try? FileIdentity(url), !identity.isSymbolicLink else { enumerator.skipDescendants(); skipped += 1; continue }
                 if identity.isRegular, let old = prior[path], !old.package, old.signature == LibraryFile.signature(identity) {
-                    items.append(old)
-                    if items.count.isMultiple(of: 100) { progress?(items.count) }
+                    enqueue(.ready(old))
                     continue
                 }
                 // Regular files sit in directories that already passed this check, so only directories need resolving.
@@ -155,14 +152,56 @@ public enum LibraryScanner {
                     continue
                 }
                 guard identity.isRegular || package else { skipped += 1; continue }
-                append(url, identity: identity, package: package, values: values)
+                enqueue(.fresh(url, identity, package, values))
             }
             // Access errors make coverage partial; only cancellation or global budgets stop later roots.
             if stopped() { break }
         }
+        flush()
         var result = LibrarySnapshot(items: items, roots: roots.map { SearchScope.canonicalPath($0.path) }, complete: complete, skipped: skipped)
         result.issues = issues; result.limitReached = limitReached
         return result
+    }
+
+    /// Files waiting to be recorded: an unchanged earlier record, or a new file whose metadata still has to be read.
+    enum Pending { case ready(LibraryFile), fresh(URL, FileIdentity, Bool, URLResourceValues?) }
+    static let batchSize = 256
+    /// Bounded so Spotlight (mds) is not flooded; more workers measured no faster.
+    static let metadataWorkers = 4
+    /// Every Spotlight attribute the library keeps, fetched in one call per file (one round trip to mds instead of eight).
+    static let spotlightKeys = ["kMDItemWhereFroms", "kMDItemPixelWidth", "kMDItemPixelHeight", "kMDItemContentCreationDate",
+                                "kMDItemLastUsedDate", "kMDItemAcquisitionModel", "kMDItemDurationSeconds", "kMDItemIsScreenCapture"]
+
+    static func record(_ batch: [Pending]) -> [LibraryFile] {
+        var output = [LibraryFile?](repeating: nil, count: batch.count)
+        output.withUnsafeMutableBufferPointer { slots in
+            let slots = slots
+            DispatchQueue.concurrentPerform(iterations: min(metadataWorkers, batch.count)) { worker in
+                for index in stride(from: worker, to: batch.count, by: metadataWorkers) {
+                    switch batch[index] {
+                    case .ready(let file): slots[index] = file
+                    case let .fresh(url, identity, package, values): slots[index] = record(url, identity: identity, package: package, values: values)
+                    }
+                }
+            }
+        }
+        return output.map { $0! }
+    }
+
+    static func record(_ url: URL, identity: FileIdentity, package: Bool, values: URLResourceValues?) -> LibraryFile {
+        let attributes = MDItemCreate(nil, url.path as CFString).flatMap { MDItemCopyAttributes($0, spotlightKeys as CFArray) as? [String: Any] } ?? [:]
+        func attribute(_ key: String) -> Any? { attributes[key] }
+        let from = attribute("kMDItemWhereFroms") as? [String] ?? []
+        let source = DownloadProvenance.source(url) ?? DownloadProvenance.normalizedSource(from)
+        let width = attribute("kMDItemPixelWidth") as? NSNumber, height = attribute("kMDItemPixelHeight") as? NSNumber
+        let kind = LibraryKind.classify(url, package: package)
+        let onlineOnly = FileAvailability.isOnlineOnly(url)
+        let imageMetadata = kind == .images && !onlineOnly ? LocalFileBytes.imageMetadata(url) : (nil, nil, nil)
+        return LibraryFile(path: SearchScope.canonicalPath(url.path), name: url.lastPathComponent, kind: kind, bytes: identity.isRegular ? identity.size : 0,
+            modified: identity.modified, created: values?.creationDate, added: values?.addedToDirectoryDate, captured: imageMetadata.2 ?? attribute("kMDItemContentCreationDate") as? Date, lastUsed: attribute("kMDItemLastUsedDate") as? Date,
+            source: source, tags: values?.tagNames ?? [], camera: attribute("kMDItemAcquisitionModel") as? String ?? imageMetadata.1,
+            dimensions: width.flatMap { w in height.map { "\(w.intValue) × \($0.intValue)" } } ?? imageMetadata.0, duration: (attribute("kMDItemDurationSeconds") as? NSNumber)?.doubleValue,
+            package: package, onlineOnly: onlineOnly, screenshot: (attribute("kMDItemIsScreenCapture") as? NSNumber)?.boolValue == true || DownloadProvenance.isScreenshot(url), signature: LibraryFile.signature(identity))
     }
 }
 

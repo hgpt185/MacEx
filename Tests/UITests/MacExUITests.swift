@@ -14,7 +14,8 @@ final class MacExUITests: XCTestCase {
         try Data("Disposable inline preview fixture\n".utf8).write(to: root.appendingPathComponent("Welcome.txt"))
         let app = XCUIApplication(bundleIdentifier: "local.macex.app.uihost")
         defer { app.terminate(); try? FileManager.default.removeItem(at: base) }
-        app.launchArguments = ["--folder", root.path, "--state-directory", base.appendingPathComponent("State").path, "-fileAccessChoiceSeen", "YES"]
+        // The sidebar's Tools section remembers being collapsed; pin it open so Free Up Space is always reachable.
+        app.launchArguments = ["--folder", root.path, "--state-directory", base.appendingPathComponent("State").path, "-fileAccessChoiceSeen", "YES", "-sidebarToolsExpanded", "YES"]
         app.launch(); XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
         try check(app, root)
     }

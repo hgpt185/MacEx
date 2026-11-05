@@ -274,4 +274,73 @@ import MacExCore
         try await h.settle(200)
         #expect(h.library.selected.count == 2) // Ending the band must not count as an empty-space click.
     }
+
+    @Test func libraryDragCarriesTheWholeSelectionAndClicksStillWork() async throws {
+        for grid in [true, false] {
+            let h = try await Harness(viewMode: grid ? .icons : .list)
+            defer { h.close() }
+            h.library.snapshot = LibraryScanner.scan(roots: [h.root.appendingPathComponent("Files")])
+            h.library.show(.kind(.documents))
+            try await h.settle(900)
+            let items = h.library.items
+            #expect(items.count >= 4)
+            var dragged: [[URL]] = []
+            FileDragMonitor.shared.start = { _, urls, _ in dragged.append(urls) }
+            defer { FileDragMonitor.shared.start = { view, urls, event in view.beginDrag(urls, event: event) } }
+            let sources = h.findAll(named: "FileDragSourceView").compactMap { $0 as? FileDragSourceView }
+            #expect(sources.count >= items.count)
+            func center(_ view: NSView) -> NSPoint { view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil) }
+            /// Delivers an event the way the app does: local monitors first, then the window, unless a monitor consumed it.
+            /// Returns whether the drag monitor consumed it.
+            @discardableResult func deliver(_ type: NSEvent.EventType, _ point: NSPoint, flags: NSEvent.ModifierFlags = []) -> Bool {
+                let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: h.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+                guard let passed = FileDragMonitor.shared.handle(event) else { return true }
+                h.window.sendEvent(passed); return false
+            }
+            /// Press on `view`, move by `distance` in two steps, release. Returns whether a drag session started.
+            func drag(_ view: NSView, by distance: CGFloat, flags: NSEvent.ModifierFlags = []) async throws -> Bool {
+                let start = center(view), count = dragged.count
+                #expect(!deliver(.leftMouseDown, start, flags: flags)) // Presses always reach SwiftUI.
+                deliver(.leftMouseDragged, NSPoint(x: start.x + distance / 2, y: start.y), flags: flags)
+                deliver(.leftMouseDragged, NSPoint(x: start.x + distance, y: start.y), flags: flags)
+                deliver(.leftMouseUp, NSPoint(x: start.x + distance, y: start.y), flags: flags)
+                try await h.settle(250)
+                return dragged.count > count
+            }
+            // Map each file to its drag source: with nothing selected, a drag carries just the pressed file.
+            var sourceFor: [String: NSView] = [:]
+            for view in sources {
+                h.library.selected = []
+                if try await drag(view, by: 10), let url = dragged.last?.first { sourceFor[SearchScope.canonicalPath(url.path)] = view }
+            }
+            #expect(sourceFor.count == items.count, "grid \(grid): \(sourceFor.keys.sorted())")
+            let picked = Array(items.prefix(3).map(\.path)), outside = items[3].path
+            guard let middle = sourceFor[picked[1]], let other = sourceFor[outside] else { continue }
+            // A plain click still selects through SwiftUI, and a 3 pt wobble is still a click, not a drag.
+            h.library.selected = []
+            #expect(try await !drag(other, by: 0))
+            #expect(h.library.selected == [outside])
+            h.library.selected = Set(picked)
+            #expect(try await !drag(middle, by: 3))
+            #expect(h.library.selected == [picked[1]])
+            // Dragging one file of a three-file selection carries all three, in list order, and keeps the selection.
+            h.library.selected = Set(picked)
+            #expect(try await drag(middle, by: 12))
+            #expect(dragged.last?.map { SearchScope.canonicalPath($0.path) } == picked)
+            #expect(h.library.selected == Set(picked))
+            // Dragging a file outside the selection selects and carries just that file.
+            #expect(try await drag(other, by: 12))
+            #expect(dragged.last?.map { SearchScope.canonicalPath($0.path) } == [outside])
+            #expect(h.library.selected == [outside])
+            // ⌃-press opens the context menu and never starts a drag.
+            #expect(try await !drag(other, by: 12, flags: .control))
+            // Drag sources never take hits, so clicks and menus still land on SwiftUI's rows and tiles.
+            #expect(sources.allSatisfy { $0.hitTest(NSPoint(x: $0.bounds.midX, y: $0.bounds.midY)) == nil })
+            // Under the review overlay, presses belong to the overlay: no drag starts and drag events pass through.
+            h.library.cleanupReview = true; h.library.reviewItems = [items[0]]
+            try await h.settle(250)
+            #expect(try await !drag(other, by: 12))
+            h.library.cleanupReview = false
+        }
+    }
 }
