@@ -104,6 +104,8 @@ struct HeaderButton: View {
     }
     func click(_ id: String) {
         TapLedger.mark()
+        // The press became a file drag; its mouse-up is not a click (it would collapse the dragged selection).
+        if FileDragMonitor.shared.draggedThisPress { return }
         if Self.isDoubleClick(id) { selection = [id]; anchor = id; open(id); return }
         let flags = NSEvent.modifierFlags
         if flags.contains(.command) {
@@ -544,6 +546,9 @@ final class FileDragSourceView: NSView, NSDraggingSource {
     private var monitor: Any?
     private var pressed: (view: FileDragSourceView, point: NSPoint)?
     private var consuming = false
+    /// True from the moment a drag starts until the next press. The press's mouse-up still reaches SwiftUI, so its
+    /// gesture tracking finishes normally, but `ClickSelection` ignores the tap it may produce (macOS 15 does).
+    private(set) var draggedThisPress = false
 
     func register(_ view: FileDragSourceView) {
         views.add(view)
@@ -561,7 +566,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
     func handle(_ event: NSEvent) -> NSEvent? {
         switch event.type {
         case .leftMouseDown:
-            pressed = nil; consuming = false
+            pressed = nil; consuming = false; draggedThisPress = false
             // ⌃-click opens the context menu; it is never the start of a drag.
             guard !event.modifierFlags.contains(.control), let view = source(at: event) else { return event }
             pressed = (view, event.locationInWindow); consuming = true
@@ -572,7 +577,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
             guard let press = pressed else { return nil }
             guard hypot(event.locationInWindow.x - press.point.x, event.locationInWindow.y - press.point.y) >= 4 else { return nil }
             pressed = nil
-            if let urls = press.view.urls?(), !urls.isEmpty { start(press.view, urls, event) }
+            if let urls = press.view.urls?(), !urls.isEmpty { start(press.view, urls, event); draggedThisPress = true }
             return nil
         default:
             pressed = nil; consuming = false

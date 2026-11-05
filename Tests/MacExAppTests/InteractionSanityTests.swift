@@ -328,6 +328,18 @@ import MacExCore
             #expect(try await drag(middle, by: 12))
             #expect(dragged.last?.map { SearchScope.canonicalPath($0.path) } == picked)
             #expect(h.library.selected == Set(picked))
+            // Some macOS versions (15) still deliver a tap for the drag's mouse-up; it must not collapse the selection.
+            var anchor: String?
+            let selection = Binding(get: { h.library.selected }, set: { h.library.selected = $0 })
+            let clicks = ClickSelection(selection: selection, anchor: Binding(get: { anchor }, set: { anchor = $0 }), order: items.map(\.path)) { _ in }
+            clicks.click(picked[1])
+            #expect(h.library.selected == Set(picked))
+            // The next press is an ordinary click again.
+            _ = FileDragMonitor.shared.handle(NSEvent.mouseEvent(with: .leftMouseDown, location: center(middle), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: h.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+            _ = FileDragMonitor.shared.handle(NSEvent.mouseEvent(with: .leftMouseUp, location: center(middle), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: h.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+            clicks.click(picked[2])
+            #expect(h.library.selected == [picked[2]])
+            h.library.selected = Set(picked)
             // Dragging a file outside the selection selects and carries just that file.
             #expect(try await drag(other, by: 12))
             #expect(dragged.last?.map { SearchScope.canonicalPath($0.path) } == [outside])
