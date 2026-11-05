@@ -166,8 +166,9 @@ public enum LibraryScanner {
     /// Files waiting to be recorded: an unchanged earlier record, or a new file whose metadata still has to be read.
     enum Pending { case ready(LibraryFile), fresh(URL, FileIdentity, Bool, URLResourceValues?) }
     static let batchSize = 256
-    /// Bounded so Spotlight (mds) is not flooded; more workers measured no faster.
-    static let metadataWorkers = 4
+    /// One worker: parallel Spotlight requests (4 workers, ~2.4x faster again) starved the app's own main-thread
+    /// Spotlight and Launch Services calls on a 3-CPU CI runner, hanging the UI for 40+ s after a relaunch.
+    static let metadataWorkers = 1
     /// Every Spotlight attribute the library keeps, fetched in one call per file (one round trip to mds instead of eight).
     static let spotlightKeys = ["kMDItemWhereFroms", "kMDItemPixelWidth", "kMDItemPixelHeight", "kMDItemContentCreationDate",
                                 "kMDItemLastUsedDate", "kMDItemAcquisitionModel", "kMDItemDurationSeconds", "kMDItemIsScreenCapture"]
