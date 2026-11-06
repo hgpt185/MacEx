@@ -1,22 +1,39 @@
 name: Build and verify preview
 
 on:
+  # Every push to any branch runs the full build and tests. Pull requests from branches in this repository show
+  # these push runs as their checks, so pull_request only adds runs for forks.
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A newer push to the same branch (or PR) supersedes an older run that is still going. Manual runs are deliberate
+# (for example, repeating a run to check a flaky test), so each one gets its own group and is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   macos:
+    # Same-repository PRs are already covered by the push run of their branch.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Test services and disposable SFTP server
-        run: zsh Scripts/test-sftp.sh
+        run: |
+          mkdir -p .build
+          zsh Scripts/test-sftp.sh 2>&1 | tee .build/swift-test.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: MacEx-swift-test-log
+          path: .build/swift-test.log
+          retention-days: 7
       - name: Verify local search with network sockets denied
         run: zsh Scripts/test-local-search-offline.sh
       - name: Verify the single-window UI with Xcode

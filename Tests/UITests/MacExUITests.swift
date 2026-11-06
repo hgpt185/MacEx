@@ -105,10 +105,20 @@ final class MacExUITests: XCTestCase {
             let choice = app.radioButtons[second ?? ""]
             XCTAssertTrue(choice.waitForExistence(timeout: 5))
             XCTAssertEqual((choice.value as? NSNumber)?.intValue, 1, choice.debugDescription)
-            app.terminate(); app.launch()
-            XCTAssertTrue(app.buttons["appearance-toggle"].waitForExistence(timeout: 10))
-            XCTAssertEqual(app.buttons["appearance-toggle"].value as? String, second)
-            XCTAssertEqual(app.windows.count, 1)
+            // Relaunch explicitly: wait for the old process to exit, then talk to a fresh application object.
+            // Relaunching the same XCUIApplication in place intermittently left queries attached to the old
+            // session on the CI runner: the new window drew, but its toggle was never found.
+            app.terminate()
+            XCTAssertTrue(app.wait(for: .notRunning, timeout: 15))
+            let relaunched = XCUIApplication(bundleIdentifier: "local.macex.app.uihost")
+            defer { relaunched.terminate() }
+            relaunched.launchArguments = app.launchArguments
+            relaunched.launch()
+            XCTAssertTrue(relaunched.wait(for: .runningForeground, timeout: 20))
+            let restored = relaunched.buttons["appearance-toggle"]
+            XCTAssertTrue(restored.waitForExistence(timeout: 20), relaunched.debugDescription)
+            XCTAssertEqual(restored.value as? String, second)
+            XCTAssertEqual(relaunched.windows.count, 1)
         }
     }
     @MainActor func testFirstLibraryDuplicateScanShowsResultsInSameWindow() throws {
