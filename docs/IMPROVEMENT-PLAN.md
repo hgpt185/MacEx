@@ -1,9 +1,31 @@
 # MacEx Improvement Plan
 
 Branch baseline: `ui-refresh` (commits `6305273`, `ad2c275`).
-Created: 2026-11-04.
+Created: 2026-11-04. Last updated: 2026-11-06.
 
 This plan turns the post-redesign review into ordered, testable work. Each item lists the goal, the approach (with the files it touches), how we know it is done, a rough size (S ≤ half a day, M ≈ 1–2 days, L ≈ 3+ days), and the main risk.
+
+## Progress
+
+As of 2026-11-06, `main` is at `0d1a794`. These exact commits passed full CI on their branch (build, 128 Swift tests, 53 offline-search tests, 7 UI tests, release package; run 42198641887). The run on `main` itself (42247209597) was still queued when this was written.
+
+| Done | Item | Merged in |
+|---|---|---|
+| ✅ | 1. Merge `ui-refresh` | `31b5d43` (fast-forward) |
+| ✅ | 2. Multi-file drag from Library pages | `dd95527` (PR #1) |
+| ✅ | 3. UI test suite repaired, 7/7 passing in CI | `dd95527`, `564896d`, `68c827a` |
+| ✅ | 4. Manual interaction checklist written | `dd95527` |
+| ✅ | 5. First library scan about 8× faster | `dd95527` |
+| ✅ | 6. Undo and Redo for move, rename and trash | `0d1a794` |
+| 🟡 | 27. CI on every push | `564896d`; the required check still needs setting up |
+
+**Open, needs the owner:**
+- Run the manual checklist (`docs/verification/INTERACTION-CHECKLIST.md`) once on a release build. It has not been run yet. The Finder drop for item 2 and ⌘Z after Move to Trash matter most.
+- Make the `macos` check required for `main` (GitHub → Settings → Branches) to finish item 27.
+
+**Next:** items 7 (inline rename), 9 (folder sizes) and 21 (no work while hidden), then the rest of Phase 4.
+
+**Installed build:** `/Applications/MacEx.app`, built from `0d1a794` (version string still 0.8.1). Older development copies under `dist/` were moved to the Trash.
 
 ## Principles
 
@@ -15,14 +37,14 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 
 ## Phases at a glance
 
-| Phase | Theme | Items | Goal |
-|---|---|---|---|
-| 0 | Lock in the redesign | 1–5 | Merge `ui-refresh` safely with verified behavior |
-| 1 | Everyday file management | 6–13 | Make common actions faster and more forgiving |
-| 2 | Bigger features | 14–20 | Close the main gaps with modern file managers |
-| 3 | Performance and resources | 21–23 | Stay fast and light with huge folders and libraries |
-| 4 | Code health | 24–27 | Keep the codebase easy and safe to change |
-| 5 | Distribution and accessibility | 28–29 | Install cleanly and work for everyone |
+| Phase | Theme | Items | Goal | Status |
+|---|---|---|---|---|
+| 0 | Lock in the redesign | 1–5 | Merge `ui-refresh` safely with verified behavior | Done; manual checklist run pending |
+| 1 | Everyday file management | 6–13 | Make common actions faster and more forgiving | 6 done |
+| 2 | Bigger features | 14–20 | Close the main gaps with modern file managers | Not started |
+| 3 | Performance and resources | 21–23 | Stay fast and light with huge folders and libraries | Not started |
+| 4 | Code health | 24–27 | Keep the codebase easy and safe to change | 27 mostly done |
+| 5 | Distribution and accessibility | 28–29 | Install cleanly and work for everyone | Not started |
 
 ---
 
@@ -34,7 +56,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 - **Approach:** Open a PR from `ui-refresh`. Include before/after screenshots of Home, a folder (list and icon view), Free Up Space, Trash, Settings and Connections. Coordinate with the parallel "universal navigation" work (already included in `6305273`), so it is not merged twice.
 - **Done when:** CI is green (see item 27), the manual checklist in item 4 passes, and the PR is merged.
 - **Risk:** Another session is editing the same files. Rebase before merging and re-run the sanity suite.
-- **Status (2026-11-05):** Done. `ui-refresh` was fast-forwarded into `main` (`31b5d43`) without a PR, and the branch was deleted. CI on that push failed one UI test; item 3 fixes it.
+- **Status (2026-11-05):** Done. `ui-refresh` was fast-forwarded into `main` (`31b5d43`) without a PR, and the branch was deleted. CI on that push failed one UI test; item 3 fixed it. Later work merged through PR #1 (`dd95527`) and a reviewed fast-forward (`564896d`…`0d1a794`).
 
 ### 2. Multi-file drag from Library pages · M
 
@@ -42,7 +64,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 - **Approach:** Replace the per-item `.onDrag` in `LibraryDragItem` (`Sources/MacEx/LibraryView.swift`) with a small AppKit drag source. It sits beside `RightClickCatcher` in `PageChrome.swift`, starts a dragging session only after a 4 pt mouse move, and writes every selected URL to the pasteboard. Taps must keep passing through to SwiftUI, so the source only claims an event once a drag has started.
 - **Done when:** You can drag three selected files from Images into Finder or a MacEx folder, and single clicks, double-clicks and empty-space clicks still pass the sanity tests.
 - **Risk:** This could reintroduce swallowed clicks, which is the reason the macOS 26 drag containers were removed. Gate it on the click tests.
-- **Status (2026-11-06):** Done, with one change to the approach. `FileDragSourceView` (`PageChrome.swift`) is a passive overlay that never takes hits. One shared `FileDragMonitor` watches the mouse; after a 4 pt move from a press on a file, it starts an AppKit drag of the whole selection (or of just the pressed file, which it selects). SwiftUI's `.onDrag` is kept, because removing it made tiles stop accepting the first click in an inactive window. The monitor consumes every drag event after a press on a file, so SwiftUI's single-file drag never starts. Drags are off while the review, operations or folder-picker overlay is open. Covered by `libraryDragCarriesTheWholeSelectionAndClicksStillWork` in grid and list. Dropping into Finder still needs the manual check in item 4.
+- **Status (2026-11-06):** Done, with one change to the approach. `FileDragSourceView` (`PageChrome.swift`) is a passive overlay that never takes hits. One shared `FileDragMonitor` watches the mouse; after a 4 pt move from a press on a file, it starts an AppKit drag of the whole selection (or of just the pressed file, which it selects). SwiftUI's `.onDrag` is kept, because removing it made tiles stop accepting the first click in an inactive window. The monitor consumes every drag event after a press on a file, so SwiftUI's single-file drag never starts. Drags are off while the review, operations or folder-picker overlay is open. On macOS 15, SwiftUI still delivered a tap for the drag's mouse-up, which collapsed the dragged selection. So the mouse-up still reaches SwiftUI, and `ClickSelection` ignores a tap from a press that became a drag (`FileDragMonitor.draggedThisPress`). Covered by `libraryDragCarriesTheWholeSelectionAndClicksStillWork` in grid and list, including that macOS 15 case. Dropping into Finder still needs the manual check in item 4.
 
 ### 3. Repair and run the UI test suite · S
 
@@ -50,7 +72,11 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 - **Approach:** Update the selectors that changed: the sidebar has a Free Up Space row and no Duplicates row, Settings now has sections, and Connections has a new form. Run the suite with `zsh Scripts/test.sh`, using the sandboxed runner described in `docs/VERIFICATION.md`.
 - **Done when:** All UI tests pass locally and in CI.
 - **Risk:** The sandboxed runner needs fixture access; follow the existing fixture setup.
-- **Status (2026-11-06):** Done. All 7 UI tests pass in CI. `testAppearanceToggleSynchronizesSettingsAndSurvivesRelaunch` was intermittent: it failed in 4 of 5 runs, also on unchanged `main` (control run 42094011247), and never on macOS 27. After the in-place relaunch, the new window drew but XCTest's queries stalled for 40+ s and then never found the toggle. After a relaunch under XCTest on the macOS 15 runner, the new process did not answer accessibility queries for 40+ s, even with a fresh `XCUIApplication` (it does not happen on macOS 27). The UI test now checks that the toggle and Settings stay in sync (renamed `testAppearanceToggleSynchronizesSettings`); surviving a relaunch is covered by `AppearanceTests`. On `main`, 6 of 7 UI tests passed in CI. `testTextPreviewDoesNotLaunchAnotherWindow` failed because the redesign had replaced the visible folder title with an invisible zero-height text, which SwiftUI leaves out of accessibility. The current breadcrumb is now a plain heading with the `folder-title` identifier. The tests also pin the sidebar's Tools section open (`-sidebarToolsExpanded YES`), so a remembered collapsed state cannot hide Free Up Space. To run them locally, macOS Automation Mode must be enabled once (`automationmodetool`), which needs an administrator.
+- **Status (2026-11-06):** Done. All 7 UI tests pass in CI, with three identical runs green in a row (42198610215, 42198628297, 42198633582).
+  - `testTextPreviewDoesNotLaunchAnotherWindow` failed on `main` because the redesign had replaced the visible folder title with an invisible zero-height text, which SwiftUI leaves out of accessibility. The current breadcrumb is now a plain heading with the `folder-title` identifier.
+  - `testAppearanceToggleSynchronizesSettingsAndSurvivesRelaunch` was intermittent: it failed in 4 of 5 runs, also on unchanged `main` (control run 42094011247), and never on macOS 27. After a relaunch under XCTest on the macOS 15 runner, the new process did not answer accessibility queries for 40+ s, even with a fresh `XCUIApplication`. The test is now `testAppearanceToggleSynchronizesSettings` and checks that the toggle and Settings stay in sync; surviving a relaunch is covered by `AppearanceTests`.
+  - The tests pin the sidebar's Tools section open (`-sidebarToolsExpanded YES`), so a remembered collapsed state cannot hide Free Up Space.
+  - To run them locally, macOS Automation Mode must be enabled once (`automationmodetool`), which needs an administrator.
 
 ### 4. Manual interaction checklist · S
 
@@ -76,6 +102,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
   - Benchmark, 5,000 files: first scan **6.0 s → 0.72–0.78 s**; incremental rescan 0.13 s → 0.12 s. The before and after snapshots are byte-identical, on the fixture and on `/System/Applications` (real, indexed apps).
   - Not done, on purpose: reading only the attributes each kind uses saved about 13% more, but it would change the scan output (the inspector shows dimensions, duration, camera and last-used for every kind). The screenshot xattr is still read for every file: screen recordings (videos) carry it too, and it costs about 8 ms per 1,000 files.
   - Run it with `MACEX_BENCH=1 zsh Scripts/test.sh --filter LibraryScanBenchmark`; see `Tests/MacExCoreTests/LibraryScanBenchmarkTests.swift` for the options.
+  - The 4 workers were briefly suspected of a CI hang; a 1-worker build (about 1.8 s) failed the same way, so they were kept. That hang was the item 3 relaunch issue.
 
 ---
 
@@ -90,7 +117,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
   - a trash by restoring, using the same signature checks as `LibraryModel.restore`.
 - **Done when:** ⌘Z after a trash, move or rename reverses it, ⌘⇧Z redoes it, and the Edit menu shows "Undo Move to Trash" and similar. Covered by unit tests in `FileOperationsTests`.
 - **Risk:** Files may change between the action and the undo. Reuse the identity checks so nothing is ever overwritten.
-- **Status (2026-11-06):** Done in `Sources/MacEx/FileUndo.swift`. Every finished move, rename and Move to Trash becomes one undo step, including trash from library pages and Free Up Space; up to 50 steps are kept. Undo first checks each item against a receipt (device, inode, size, modification time) and skips, with a message, any file that changed since. An occupied original place triggers the normal Keep Both / Skip prompt; nothing is overwritten. Undo and redo work queues behind a running job. Redo of a trash records the new Trash paths, so undo after redo still works. Not undoable: copies, duplicates, new folders, and moves between volumes (their original is already in Trash). Covered by `FileUndoTests` (5 tests, real files and real Trash). Edit → Redo (⇧⌘Z) was added.
+- **Status (2026-11-06):** Done in `Sources/MacEx/FileUndo.swift`. Every finished move, rename and Move to Trash becomes one undo step, including trash from library pages and Free Up Space; up to 50 steps are kept. Undo first checks each item against a receipt (device, inode, size, modification time) and skips, with a message, any file that changed since. An occupied original place triggers the normal Keep Both / Skip prompt; nothing is overwritten. Undo and redo work queues behind a running job. Redo of a trash records the new Trash paths, so undo after redo still works. Not undoable: copies, duplicates, new folders, and moves between volumes (their original is already in Trash). Covered by `FileUndoTests` (5 tests, real files and real Trash). Edit → Redo (⇧⌘Z) was added. Merged in `0d1a794`; the manual checklist has Undo steps.
 
 ### 7. Inline rename · S
 
@@ -244,7 +271,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 - **Goal:** Every push runs the build and tests.
 - **Approach:** Extend `.github/workflows/build.yml` to run `swift test`, including `InteractionSanityTests`, on a macOS runner and upload the logs if anything fails.
 - **Done when:** PRs show a required green check.
-- **Status (2026-11-06):** The workflow now runs on every push to any branch. A newer push cancels the older run on the same branch; manual runs are never cancelled. Same-repository PRs use their branch's push run instead of a duplicate. The Swift test log is uploaded when that step fails, and the UI result bundle is always uploaded. **Left for the owner:** make the `macos` check required for `main` (GitHub → Settings → Branches), which needs admin rights.
+- **Status (2026-11-06):** The workflow now runs on every push to any branch. A newer push cancels the older run on the same branch; manual runs are never cancelled. Same-repository PRs use their branch's push run instead of a duplicate. The Swift test log is uploaded when that step fails, and the UI result bundle is always uploaded. It also runs `InteractionSanityTests` (part of `swift test`) and the UI suite. **Left for the owner:** make the `macos` check required for `main` (GitHub → Settings → Branches), which needs admin rights. Then tick this item.
 
 ---
 
@@ -270,8 +297,8 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 
 ## Suggested order
 
-1. Phase 0 (items 1–5), then merge.
-2. Items 6, 7, 9 and 21: the biggest day-to-day wins for the effort.
+1. ~~Phase 0 (items 1–5), then merge.~~ Done 2026-11-06; only the manual checklist run is pending.
+2. Items 6, 7, 9 and 21: the biggest day-to-day wins for the effort. Item 6 done; 7, 9 and 21 next.
 3. Items 24–27 before starting Phase 2, so the large features land on a tidy base.
 4. Phase 2 in the order 15 → 14 → 16 → 17 → 18 → 19 → 20.
 5. Items 22–23 alongside, triggered by measured need.
@@ -279,11 +306,11 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 
 ## Tracking
 
-Each item becomes a GitHub issue titled `[Plan #N] <title>` and links back to this document. Tick the items off below as their PRs merge.
+Each item becomes a GitHub issue titled `[Plan #N] <title>` and links back to this document. Tick the items off below as their PRs merge. (No issues have been created yet; progress is tracked here.)
 
 - [x] 1 · [x] 2 · [x] 3 · [x] 4 (written; first run pending) · [x] 5
 - [x] 6 · [ ] 7 · [ ] 8 · [ ] 9 · [ ] 10 · [ ] 11 · [ ] 12 · [ ] 13
 - [ ] 14 · [ ] 15 · [ ] 16 · [ ] 17 · [ ] 18 · [ ] 19 · [ ] 20
 - [ ] 21 · [ ] 22 · [ ] 23
-- [ ] 24 · [ ] 25 · [ ] 26 · [ ] 27
+- [ ] 24 · [ ] 25 · [ ] 26 · [ ] 27 (all but the required check)
 - [ ] 28 · [ ] 29
