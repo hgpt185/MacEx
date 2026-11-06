@@ -28,6 +28,8 @@ Do every step in both views.
 - [ ] Drag a file onto a subfolder in MacEx: it is copied; hold ⌘ to move.
 - [ ] Space opens the preview; Esc closes it; no second window appears.
 - [ ] Return renames the selected file; Esc cancels.
+- [ ] ⌘Z after a rename, a move (drag onto a subfolder with ⌘) and Move to Trash puts the files back; the Edit menu reads "Undo Rename", "Undo Move", "Undo Move to Trash". ⇧⌘Z redoes each one.
+- [ ] Rename a file, edit and save it in another app, then ⌘Z: MacEx says it changed and leaves it alone.
 
 ## 2. Library pages (Images, Documents, Recents…): grid and list
 
@@ -49,6 +51,7 @@ Do every step in both views.
 - [ ] Duplicates: Find Duplicates shows the two identical copies; the newest one is marked Keep.
 - [ ] Review & Move to Trash shows a review of exactly the ticked files; Cancel changes nothing.
 - [ ] Move to Trash: the files leave the library and the cards at once.
+- [ ] ⌘Z right after: the files come back to their folders and reappear in the library.
 - [ ] While the review is open, files behind it cannot be clicked or dragged.
 - [ ] Trash page: the moved files are listed; Restore puts one back in its original folder.
 - [ ] Restore All restores the rest; nothing that already exists is overwritten.

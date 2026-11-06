@@ -90,6 +90,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
   - a trash by restoring, using the same signature checks as `LibraryModel.restore`.
 - **Done when:** ⌘Z after a trash, move or rename reverses it, ⌘⇧Z redoes it, and the Edit menu shows "Undo Move to Trash" and similar. Covered by unit tests in `FileOperationsTests`.
 - **Risk:** Files may change between the action and the undo. Reuse the identity checks so nothing is ever overwritten.
+- **Status (2026-11-06):** Done in `Sources/MacEx/FileUndo.swift`. Every finished move, rename and Move to Trash becomes one undo step, including trash from library pages and Free Up Space; up to 50 steps are kept. Undo first checks each item against a receipt (device, inode, size, modification time) and skips, with a message, any file that changed since. An occupied original place triggers the normal Keep Both / Skip prompt; nothing is overwritten. Undo and redo work queues behind a running job. Redo of a trash records the new Trash paths, so undo after redo still works. Not undoable: copies, duplicates, new folders, and moves between volumes (their original is already in Trash). Covered by `FileUndoTests` (5 tests, real files and real Trash). Edit → Redo (⇧⌘Z) was added.
 
 ### 7. Inline rename · S
 
@@ -281,7 +282,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 Each item becomes a GitHub issue titled `[Plan #N] <title>` and links back to this document. Tick the items off below as their PRs merge.
 
 - [x] 1 · [x] 2 · [x] 3 · [x] 4 (written; first run pending) · [x] 5
-- [ ] 6 · [ ] 7 · [ ] 8 · [ ] 9 · [ ] 10 · [ ] 11 · [ ] 12 · [ ] 13
+- [x] 6 · [ ] 7 · [ ] 8 · [ ] 9 · [ ] 10 · [ ] 11 · [ ] 12 · [ ] 13
 - [ ] 14 · [ ] 15 · [ ] 16 · [ ] 17 · [ ] 18 · [ ] 19 · [ ] 20
 - [ ] 21 · [ ] 22 · [ ] 23
 - [ ] 24 · [ ] 25 · [ ] 26 · [ ] 27

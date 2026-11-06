@@ -80,8 +80,12 @@ final class SharedJobs: ObservableObject {
     private var control: JobControl?
     weak var owner: BrowserModel?
     var copiedPasteboardChange = -1
+    /// ⌘Z / ⇧⌘Z for finished moves, renames and trash operations.
+    let undo = FileUndo()
+    init() { undo.jobs = self }
 
-    func start(_ request: OperationRequest, owner: BrowserModel) {
+    /// `undoable` is false for the jobs Undo and Redo run themselves. `completion` runs when the job finishes.
+    func start(_ request: OperationRequest, owner: BrowserModel, undoable: Bool = true, completion: ((JobSummary) -> Void)? = nil) {
         guard !busy else { owner.errorMessage = "Another operation is running. Open File Operations to review or cancel it."; return }
         let control = JobControl(); self.control = control; self.owner = owner
         action = request.action; summary = nil; busy = true
@@ -96,6 +100,8 @@ final class SharedJobs: ObservableObject {
                     summary = result; self.control = nil; busy = false; progress = nil
                     NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
                     if !result.errors.isEmpty { owner.errorMessage = result.errors.joined(separator: "\n") }
+                    if undoable { undo.record(request.action, result, owner: owner) }
+                    completion?(result)
                 }
             }
         }
@@ -107,7 +113,9 @@ final class SharedJobs: ObservableObject {
             for await event in MacExCore.OperationQueue.startLibraryCleanup(review, control: control) {
                 switch event {
                 case let .progress(value): progress = value
-                case let .finished(value): summary = value; progress = nil; busy = false; self.control = nil; NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
+                case let .finished(value):
+                    summary = value; progress = nil; busy = false; self.control = nil; NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
+                    undo.record(.trash, value, owner: owner)
                 case .conflict: break
                 }
             }
@@ -124,6 +132,7 @@ final class SharedJobs: ObservableObject {
                 case let .finished(result):
                     summary = result; self.control = nil; busy = false; progress = nil
                     NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
+                    undo.record(.trash, result, owner: owner)
                     completion(result)
                 case .conflict: break
                 }

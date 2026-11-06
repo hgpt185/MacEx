@@ -18,6 +18,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     }
     required init?(coder: NSCoder) { nil }
     override func newWindowForTab(_ sender: Any?) { window?.makeKeyAndOrderFront(nil) }
+    /// File operations share one undo history; Edit → Undo shows its name (for example "Undo Move to Trash").
+    func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { model.workspace.jobs.undo.manager }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if model.busy { model.showingOperations = true; return false }
         library.previewURL = nil; sender.orderOut(nil); return false
