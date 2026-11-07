@@ -101,11 +101,11 @@ final class MacExUITests: XCTestCase {
             waitForExpectations(timeout: 5)
             path.typeKey(.return, modifierFlags: [])
             let heading = app.staticTexts["folder-title"]
-            expectation(for: NSPredicate(format: "value == %@", "Destination"), evaluatedWith: heading)
+            expectation(for: NSPredicate(format: "label == %@ OR value == %@", "Destination", "Destination"), evaluatedWith: heading)
             waitForExpectations(timeout: 5)
             app.typeKey("/", modifierFlags: .command)
             XCTAssertTrue(app.staticTexts["Keyboard Shortcuts"].waitForExistence(timeout: 5))
-            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "Edit Path")).firstMatch.exists)
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "Edit Path", "Edit Path")).firstMatch.exists)
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertFalse(app.staticTexts["Keyboard Shortcuts"].exists)
             XCTAssertEqual(app.windows.count, 1)

@@ -45,3 +45,5 @@
 - Required main check configured and read back: macos, Actions app15368, strict and administrator enforcement; skipped PR jobs receive a distinct display name.
 
 - Published implementation `78d50ff` in [draft PR #3](https://github.com/hgpt185/MacEx/pull/3), targeting Phase 1. No merge performed.
+
+- Integration update (2026-11-07): PR #3 merged into Phase 1 at `fa6adb5`; PR #2 consolidates items 7–13, 21 and 24–27 for protected main. Native CI follow-up restores filename accessibility after Escape and accepts heading labels/values. Current status and remaining manual checks are in `docs/IMPROVEMENT-PLAN.md`; earlier ledger entries are historical.

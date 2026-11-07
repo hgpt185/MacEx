@@ -125,6 +125,7 @@ import MacExCore
             #expect(try h.command(#selector(NSResponder.cancelOperation(_:)), field: field))
             #expect(h.renameEditor(in: files) == nil)
             #expect(nativeName?.isEditable == false && nativeName?.isHidden == false && nativeName?.stringValue == "alpha.txt")
+            #expect(field.accessibilityRole() == .staticText, "Escape must restore an accessible filename label, not an unknown element")
             #expect(FileManager.default.fileExists(atPath: h.browser.location.appendingPathComponent("alpha.txt").path))
             #expect(!h.workspace.jobs.busy && !h.workspace.jobs.undo.manager.canUndo)
         }

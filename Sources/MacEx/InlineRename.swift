@@ -22,8 +22,8 @@ import MacExCore
             field.isBezeled = bezeled; field.isBordered = bordered; field.drawsBackground = background
             field.focusRingType = focus; field.maximumNumberOfLines = lines
             field.setAccessibilityIdentifier(identifier); field.setAccessibilityLabel(label); field.setAccessibilityHelp(help)
-            // Clear the editing override so AppKit derives the read-only label role again.
-            field.setAccessibilityRole(nil); field.delegate = delegate
+            // A nil override leaves AppKit exposing an unknown element after editing.
+            field.setAccessibilityRole(editable ? .textField : .staticText); field.delegate = delegate
         }
     }
     private weak var model: BrowserModel?

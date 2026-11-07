@@ -108,3 +108,5 @@ The user authorized execution of the existing Phase 1 plan. Extend the existing 
 - Finalization (2026-11-07): user requested commit, publication and documentation update; preserve pending manual/platform checks rather than claim them passed.
 
 - Published: implementation commit `7a1f1ef`, [draft PR #2](https://github.com/hgpt185/MacEx/pull/2). Local work is saved and pushed; CI and documented manual checks remain pending.
+
+- Integration update (2026-11-07): PR #3 merged into Phase 1 at `fa6adb5`; PR #2 consolidates items 7–13, 21 and 24–27 for protected main. Native CI follow-up restores filename accessibility after Escape and accepts heading labels/values. Current status and remaining manual checks are in `docs/IMPROVEMENT-PLAN.md`; earlier ledger entries are historical.
