@@ -7,7 +7,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 
 ## Progress
 
-Phase 1 items **7–13 are implemented and locally verified** on `codex/phase1-daily-use`, based on `2868e39`. They are not merged into `main` yet. Final local verification: **96 core tests and 63 app tests passed**, including disposable SFTP fixtures; offline-search checks, the release bundle and the native Xcode UI-test build also passed. Native Xcode UI-test execution remains pending because local Automation Mode is disabled. See [Phase 1 verification](verification/PHASE1-DAILY-USE.md) for evidence, performance measurements and remaining manual/platform checks.
+Phase 1 items **7–13 are implemented and locally verified** on `codex/phase1-daily-use`, based on `2868e39`. Published as [PR #2](https://github.com/hgpt185/MacEx/pull/2), implementation commit `7a1f1ef`; not merged into `main` yet. Final local verification: **96 core tests and 63 app tests passed**, including disposable SFTP fixtures; offline-search checks, the release bundle and the native Xcode UI-test build also passed. Native Xcode UI-test execution remains pending because local Automation Mode is disabled. See [Phase 1 verification](verification/PHASE1-DAILY-USE.md) for evidence, performance measurements and remaining manual/platform checks.
 
 The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its subsequent `main` run 42247209597 failed to acquire a hosted runner; no test step ran. This historical infrastructure failure is separate from the Phase 1 local results.
 
@@ -19,7 +19,7 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 | ✅ | 4. Manual interaction checklist written | `dd95527` |
 | ✅ | 5. First library scan about 8× faster | `dd95527` |
 | ✅ | 6. Undo and Redo for move, rename and trash | `0d1a794` |
-| ✅ | 7–13. Remaining Phase 1 features | Implemented on `codex/phase1-daily-use`; merge and CI pending |
+| ✅ | 7–13. Remaining Phase 1 features | [PR #2](https://github.com/hgpt185/MacEx/pull/2), `7a1f1ef`; merge and CI pending |
 | 🟡 | 27. CI on every push | `564896d`; the required check still needs setting up |
 
 **Open, needs the owner:**
