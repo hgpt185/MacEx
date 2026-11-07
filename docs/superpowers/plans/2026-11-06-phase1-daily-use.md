@@ -106,3 +106,5 @@ The user authorized execution of the existing Phase 1 plan. Extend the existing 
 - Ruling: file-change notifications carry their SharedJobs owner, preventing unrelated workspaces from cancelling inline edits. A deterministic real-window test reproduced the failure before the fix.
 
 - Finalization (2026-11-07): user requested commit, publication and documentation update; preserve pending manual/platform checks rather than claim them passed.
+
+- Published: implementation commit `7a1f1ef`, [draft PR #2](https://github.com/hgpt185/MacEx/pull/2). Local work is saved and pushed; CI and documented manual checks remain pending.

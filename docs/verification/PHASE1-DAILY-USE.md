@@ -47,7 +47,7 @@ No personal file was moved, renamed or trashed during these checks. The native a
 
 - Xcode UI-test execution is pending: `/usr/bin/automationmodetool status` reports Automation Mode disabled and requires user authentication to enable it. The native test host and workflow tests are built locally; build success is not a UI-test pass.
 - The complete pre-release interaction checklist, fresh-profile onboarding walkthrough, cleanup exclusion context menus/settings walkthrough, media-format matrix, idle CPU measurement, physical/cloud volumes, Intel and macOS 14 runtime checks remain manual/platform verification.
-- This feature branch is prepared for publication. CI and merge status are separate from implementation and local verification. Developer ID/notarization remains optional for GitHub previews under `ROADMAP.md`.
+- Published in [draft PR #2](https://github.com/hgpt185/MacEx/pull/2), implementation commit `7a1f1ef`. CI and merge status are separate from implementation and local verification. Developer ID/notarization remains optional for GitHub previews under `ROADMAP.md`.
 
 ## Review and fixes
 
