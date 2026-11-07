@@ -43,3 +43,5 @@
 - Final review: late hidden folder events and duplicate rapid-resume indexing were reproduced before fixes, then passed focused tests. Review cleared both fixes.
 - Local verification: 96 core + 73 app tests, 27 offline tests, release bundle and native Xcode test build passed. Physical resource/native UI execution checks remain pending.
 - Required main check configured and read back: macos, Actions app15368, strict and administrator enforcement; skipped PR jobs receive a distinct display name.
+
+- Published implementation `78d50ff` in [draft PR #3](https://github.com/hgpt185/MacEx/pull/3), targeting Phase 1. No merge performed.

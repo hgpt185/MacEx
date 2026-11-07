@@ -32,4 +32,3 @@ struct LibraryThumbnail: View {
             .task(id: url) { state.load(url) }.onDisappear { state.cancel() }
     }
 }
-

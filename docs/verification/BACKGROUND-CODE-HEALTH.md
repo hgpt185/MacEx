@@ -1,6 +1,6 @@
 # Background activity and code-health verification
 
-Date: 2026-11-07. Baseline: `40a4e13` (Phase 1 PR #2). Branch: `codex/background-code-health`.
+Date: 2026-11-07. Baseline: `40a4e13` (Phase 1 PR #2). Branch: `codex/background-code-health`. Published as [draft PR #3](https://github.com/hgpt185/MacEx/pull/3), implementation commit `78d50ff`.
 
 ## Implemented work
 
