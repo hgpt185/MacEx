@@ -47,7 +47,7 @@ No personal file was moved, renamed or trashed during these checks. The native a
 
 - Xcode UI-test execution is pending: `/usr/bin/automationmodetool status` reports Automation Mode disabled and requires user authentication to enable it. The native test host and workflow tests are built locally; build success is not a UI-test pass.
 - The complete pre-release interaction checklist, fresh-profile onboarding walkthrough, cleanup exclusion context menus/settings walkthrough, media-format matrix, idle CPU measurement, physical/cloud volumes, Intel and macOS 14 runtime checks remain manual/platform verification.
-- Published in [PR #2](https://github.com/hgpt185/MacEx/pull/2), implementation commit `7a1f1ef`. CI and merge status are separate from implementation and local verification. Developer ID/notarization remains optional for GitHub previews under `ROADMAP.md`.
+- Published in [PR #2](https://github.com/hgpt185/MacEx/pull/2), implementation commit `7a1f1ef` (on `main` as `1f653f0` after the rebase merge). Developer ID/notarization remains optional for GitHub previews under `ROADMAP.md`.
 
 ## Review and fixes
 
@@ -67,3 +67,9 @@ Logs are retained locally at `/private/tmp/macex-phase1-full-tests.log`, `/priva
 ## Consolidated integration follow-up (2026-11-07)
 
 Continuation PR #3 merged into this branch at `fa6adb5`, adding items 21 and 24–27. Consolidated local coverage is 96 core + 73 app tests. CI follow-up fixes path attachment focus, label/value heading assertions and the unknown filename accessibility role after Escape. The role regression failed in both list/icon views before the explicit static-text restoration, then passed. PR #2 carries all changes to main under the required CI gate; historical results above remain the Phase 1 evidence.
+
+## Merged to main (2026-11-07)
+
+PR #2 was rebase-merged into `main` at 09:52 UTC on 2026-11-07. Its 8 commits are `1f653f0`…`d4d4ce5` on `main`; the branch tip `771f684` has identical content. Before merging, `swift test` on `771f684` passed all 73 app-target tests locally. The required `macos` check passed on `771f684` ([run 42360807647](https://github.com/hgpt185/MacEx/actions/runs/42360807647)), including 11/11 native UI tests and the offline search suite. Native UI execution, which was pending locally above, is covered by that run.
+
+That run's Swift test step reported `FolderSizeModelTests.cancellationAndNavigationDiscardQueuedCompletions` as failed but did not fail the job, because the step pipes through `tee` without `pipefail`. See the known CI gap in [the improvement plan](../IMPROVEMENT-PLAN.md#progress).

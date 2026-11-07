@@ -1,6 +1,6 @@
 # Background activity and code-health verification
 
-Date: 2026-11-07. Baseline: `40a4e13` (Phase 1 PR #2). Branch: `codex/background-code-health`. Published as [PR #3](https://github.com/hgpt185/MacEx/pull/3), implementation commit `78d50ff`.
+Date: 2026-11-07. Baseline: `40a4e13` (Phase 1 PR #2). Branch: `codex/background-code-health`. Published as [PR #3](https://github.com/hgpt185/MacEx/pull/3), implementation commit `78d50ff` (on `main` as `c49b0bb`).
 
 ## Implemented work
 
@@ -39,7 +39,7 @@ Eight focused background tests passed after review fixes. Final integrated comma
 
 - Physical battery switching, sustained idle CPU/wakeup measurement, minimize/occlusion transitions, the complete release checklist and supported-platform runtime checks remain manual. Automated tests establish scan/watch suspension; no measurement of absolute zero process CPU is claimed.
 - Local Automation Mode remains disabled, so the Xcode UI suite is built locally and must execute in CI. The new hide/return workflow test and the two macOS 15 follow-up cases remain part of that gate.
-- PR #3 was merged into Phase 1 at `fa6adb5` on 2026-11-07. Consolidated delivery to protected `main` is [PR #2](https://github.com/hgpt185/MacEx/pull/2). This work does not publish a public release or replace `/Applications/MacEx.app`.
+- PR #3 was merged into Phase 1 at `fa6adb5` on 2026-11-07. Phase 1, including this work, was merged to protected `main` through [PR #2](https://github.com/hgpt185/MacEx/pull/2) the same day. This work does not publish a public release or replace `/Applications/MacEx.app`.
 - Larger features (14–20), thumbnail optimization (22), huge-folder paging (23), optional signing (28) and the full accessibility pass (29) remain outside this work.
 
 ## Final results
@@ -61,3 +61,7 @@ Run [42348920348](https://github.com/hgpt185/MacEx/actions/runs/42348920348) pas
 Full diagnostics from run [42351276279](https://github.com/hgpt185/MacEx/actions/runs/42351276279) identified `SingleWindowView.crumbRow`'s lazy `ForEach` content as the actor violation. The loop now constructs a dedicated breadcrumb view using immutable URL/Boolean inputs and a main-actor navigation action. Its initializer is nonisolated; native artwork and navigation remain in its main-actor body. The existing list-cancel/grid-switch native regression remains the CI gate. Local external accessibility checks passed in both file views after Escape.
 
 Run [42356132512](https://github.com/hgpt185/MacEx/actions/runs/42356132512) completed the breadcrumb transition without a crash and reached icon rename editing. Its remaining failure was a nonunique XCTest query: AppKit exposes both the native text field and its active field-editor child with the same identifier. The query now selects the first matching field; value, Escape, restored filename and absence-of-editor assertions remain enabled.
+
+Run [42360807647](https://github.com/hgpt185/MacEx/actions/runs/42360807647) on `771f684` passed the required check: 11/11 native UI tests, offline search and packaging. PR #2 was then rebase-merged into `main` on 2026-11-07 (`main` at `d4d4ce5`).
+
+**Known gap:** the Swift test step pipes through `tee` without `pipefail`, so its failures do not fail the job. In runs 42348920348, 42351276279, 42356132512 and 42360807647, `FolderSizeModelTests.cancellationAndNavigationDiscardQueuedCompletions` (added in this work) failed on the CI runner while passing locally; `LocalIndexTests.imageSimilarityUsesExplicitLocalReferenceAndTransientFeaturePrints` also failed in 42348920348 and 42356132512. Item 27's required check therefore does not yet gate the main Swift suite.

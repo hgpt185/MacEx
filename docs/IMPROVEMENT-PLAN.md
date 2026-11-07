@@ -7,9 +7,11 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 
 ## Progress
 
-**Completed implementation:** items **1–13, 21 and 24–27**. Phase 1 and the background/code-health continuation are consolidated in [PR #2](https://github.com/hgpt185/MacEx/pull/2), the delivery record for `main`. [PR #3](https://github.com/hgpt185/MacEx/pull/3) was merged into Phase 1 at `fa6adb5` on 2026-11-07.
+**Completed implementation:** items **1–13, 21 and 24–27**, all merged to `main`. [PR #3](https://github.com/hgpt185/MacEx/pull/3) was merged into Phase 1 at `fa6adb5` on 2026-11-07. Phase 1 and that continuation were then merged to `main` through [PR #2](https://github.com/hgpt185/MacEx/pull/2) on 2026-11-07 (rebase merge; 8 commits, `1f653f0`…`d4d4ce5`).
 
-Local integrated verification covers **96 core + 73 app tests**, 27 offline tests, the release bundle and the native Xcode UI-test build. The merge gate is the required GitHub Actions `macos` check, including native UI execution and universal preview packaging; its live result is linked from PR #2. Main protection requires an up-to-date successful check, including for administrators.
+Local integrated verification covers **96 core + 73 app tests**, 27 offline tests, the release bundle and the native Xcode UI-test build. Re-run on `771f684` before the merge: 73 app-target tests passed locally. The required `macos` check passed on PR #2's final commit ([run 42360807647](https://github.com/hgpt185/MacEx/actions/runs/42360807647)): 11/11 native UI tests and the offline search suite passed. Main protection requires an up-to-date successful check, including for administrators.
+
+**Known CI gap (found after the merge):** the workflow's "Test services and disposable SFTP server" step pipes `Scripts/test-sftp.sh` through `tee` under GitHub's default `bash -e` shell, without `pipefail`, so Swift test failures in that step do not fail the job (in place since `564896d`). In every PR #2 run checked, including the passing run above, `FolderSizeModelTests.cancellationAndNavigationDiscardQueuedCompletions` failed on the CI runner (`FolderSizeModelTests.swift:18`, size not delivered within 10 s); it passes locally. `LocalIndexTests.imageSimilarityUsesExplicitLocalReferenceAndTransientFeaturePrints` also failed in 2 of those runs. Until the step uses `pipefail`, the required check gates UI tests, offline search and packaging, not the main Swift test suite.
 
 CI follow-up corrected path-field attachment focus, heading label/value assertions restoration of the native filename's static-text accessibility role after Escape, and lazy breadcrumb construction without off-main state access. The role regression failed in both list and icon views before the fix, then passed. See [Phase 1 verification](verification/PHASE1-DAILY-USE.md) and [background/code-health verification](verification/BACKGROUND-CODE-HEALTH.md) for evidence and validation limits.
 
@@ -23,12 +25,13 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 | ✅ | 4. Manual interaction checklist written | `dd95527` |
 | ✅ | 5. First library scan about 8× faster | `dd95527` |
 | ✅ | 6. Undo and Redo for move, rename and trash | `0d1a794` |
-| ✅ | 7–13. Remaining Phase 1 features | [PR #2](https://github.com/hgpt185/MacEx/pull/2), Phase 1 implementation; consolidated delivery to `main` |
-| ✅ | 21. Background and battery-aware watching | PR #3 → Phase 1 → PR #2 |
-| ✅ | 24–26. View extraction, public settings layout, file-effect services | PR #3 → Phase 1 → PR #2 |
-| ✅ | 27. CI on every push and required `macos` check | `main` protection configured and verified; workflow included in PR #2 |
+| ✅ | 7–13. Remaining Phase 1 features | [PR #2](https://github.com/hgpt185/MacEx/pull/2) → `main` (`1f653f0`) |
+| ✅ | 21. Background and battery-aware watching | PR #3 → Phase 1 → PR #2 → `main` (`c49b0bb`) |
+| ✅ | 24–26. View extraction, public settings layout, file-effect services | PR #3 → Phase 1 → PR #2 → `main` (`c49b0bb`) |
+| ✅ | 27. CI on every push and required `macos` check | `main` protection configured and verified; workflow merged through PR #2. Unit-test step does not fail the job (see known CI gap) |
 
 **Open, needs the owner:**
+- Decide on the known CI gap: add `pipefail` to the unit-test step, and fix or stabilize `FolderSizeModelTests.cancellationAndNavigationDiscardQueuedCompletions` (and the intermittent `imageSimilarity` test) on the CI runner. Both will fail `main` once `pipefail` is added.
 - Run the manual checklist (`docs/verification/INTERACTION-CHECKLIST.md`) once on a release build. It has not been run yet. The Finder drop for item 2 and ⌘Z after Move to Trash matter most.
 - Complete physical battery/idle CPU measurements, fresh-profile onboarding, provider/volume checks, Intel/macOS 14 runtime checks and the full accessibility pass. Local Automation Mode is disabled; native UI execution runs in the required CI gate.
 
@@ -51,10 +54,10 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 | Phase | Theme | Items | Goal | Status |
 |---|---|---|---|---|
 | 0 | Lock in the redesign | 1–5 | Merge `ui-refresh` safely with verified behavior | Done; manual checklist run pending |
-| 1 | Everyday file management | 6–13 | Make common actions faster and more forgiving | Implemented; consolidated delivery through PR #2 |
+| 1 | Everyday file management | 6–13 | Make common actions faster and more forgiving | Implemented; merged to `main` through PR #2 |
 | 2 | Bigger features | 14–20 | Close the main gaps with modern file managers | Not started |
 | 3 | Performance and resources | 21–23 | Stay fast and light with huge folders and libraries | 21 implemented; 22–23 remain |
-| 4 | Code health | 24–27 | Keep the codebase easy and safe to change | Implemented; required main check configured |
+| 4 | Code health | 24–27 | Keep the codebase easy and safe to change | Implemented and merged; required main check configured (unit-test step gap open) |
 | 5 | Distribution and accessibility | 28–29 | Install cleanly and work for everyone | Not started |
 
 ---
@@ -138,7 +141,7 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
   - **Icon view:** add an overlay field on the tile in `FileIcons.swift`.
   - **Behavior:** the field starts with the name selected but not the extension; Esc cancels; validate with `DirectoryReader.validateName`.
 - **Done when:** You can rename in both views without a dialog. Invalid names show an inline error, and a sanity test covers it.
-- **Status (2026-11-07):** Implemented in both native file views. Return and completed slow second clicks edit the existing name field; basename selection, validation, Escape, case-only rename, scroll/reuse, refresh cancellation and real Undo are covered by interaction tests. The field uses native cell accessibility and restores its static-text role after cancellation; CI covers the external hierarchy. Delivery through PR #2.
+- **Status (2026-11-07):** Implemented in both native file views. Return and completed slow second clicks edit the existing name field; basename selection, validation, Escape, case-only rename, scroll/reuse, refresh cancellation and real Undo are covered by interaction tests. The field uses native cell accessibility and restores its static-text role after cancellation; CI covers the external hierarchy. Merged to `main` through PR #2 on 2026-11-07.
 
 ### 8. Editable path bar (⌘L) · S
 
