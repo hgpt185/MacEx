@@ -69,6 +69,8 @@ import MacExCore
             workspace.changed = { [weak self] in self?.save() }
             if !canSave { library.status = "Workspace could not load; the original file is preserved and workspace saving is disabled." }
             configureMenuBar(); configureHotKey(); installKeys(); show()
+            while !library.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+            library.onboardingPresented = !library.settings.onboardingComplete && !CommandLine.arguments.contains("--state-directory")
             if let pendingSearch { self.pendingSearch = nil; search(pendingSearch) }
         }
     }
@@ -135,7 +137,9 @@ import MacExCore
             let handled = MainActor.assumeIsolated {
                 guard let self, let library = self.library else { return false }
                 if self.workspace.interaction.request != nil { return false }
-                if self.controller?.window?.firstResponder is NSTextView { return false }
+                if let handled = library.handleOverlayKey(event) { return handled }
+                let editing = (self.controller?.window?.firstResponder as? NSTextView)?.isEditable == true
+                if editing { return false }
                 if event.modifierFlags.contains(.command) && event.modifierFlags.intersection([.shift, .option, .control]).isEmpty && library.route != .folder && library.route != .trash {
                     if event.keyCode == 8 { NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects(library.selected.map { NSURL(fileURLWithPath: $0) }); return true }
                     if event.keyCode == 0 { library.selected = Set(library.items.map(\.path)); return true }
@@ -146,11 +150,6 @@ import MacExCore
                 }
                 if event.keyCode == 53 { library.previewURL = nil; library.inspector = false; return true }
                 if event.keyCode == 49 && !event.modifierFlags.contains(.command) { self.preview(); return true }
-                // In folders the table/grid moves the selection natively and the preview follows it.
-                if library.previewURL != nil && library.route != .folder && [123,124,125,126].contains(event.keyCode) {
-                    let columns = max(1, Int(((self.controller?.window?.frame.width ?? 1240) - 250) / (library.settings.cardSize + 18)))
-                    library.stepPreview(event.keyCode == 123 ? -1 : event.keyCode == 124 ? 1 : event.keyCode == 125 ? columns : -columns); return true
-                }
                 return false
             }
             return handled ? nil : event
@@ -169,11 +168,16 @@ import MacExCore
         let editRoot = NSMenuItem(title: "Edit", action: nil, keyEquivalent: ""); let edit = NSMenu(title: "Edit")
         for (title, action, key) in [("Undo", Selector(("undo:")), "z"), ("Redo", Selector(("redo:")), "Z"), ("Cut", #selector(NSText.cut(_:)), "x"), ("Copy", #selector(NSText.copy(_:)), "c"), ("Paste", #selector(NSText.paste(_:)), "v"), ("Select All", #selector(NSText.selectAll(_:)), "a")] { edit.addItem(NSMenuItem(title: title, action: action, keyEquivalent: key)) }
         editRoot.submenu = edit; main.addItem(editRoot)
-        add("View", [("Search", #selector(quickSearch), "f", .command), ("Downloaded From", #selector(sources), "j", [.command,.shift]), ("Copy Text", #selector(copyText), "c", [.command,.shift]), ("Inspector", #selector(inspector), "i", .command), ("Grid", #selector(grid), "1", .command), ("List", #selector(list), "2", .command), ("Bigger Cards", #selector(bigger), "+", .command), ("Smaller Cards", #selector(smaller), "-", .command), ("Switch Look", #selector(look), "t", [.command,.control]), ("Duplicates", #selector(duplicates), "d", [.command,.shift]), ("Clean Up", #selector(cleanup), "k", [.command,.shift]), ("Previous Track", #selector(previousTrack), "\u{f702}", .command), ("Next Track", #selector(nextTrack), "\u{f703}", .command), ("Play / Pause", #selector(play), " ", .command), ("Refresh", #selector(refresh), "r", .command)])
-        add("Go", [("Home", #selector(home), "h", [.command,.shift]), ("Go to Folder", #selector(go), "g", [.command,.shift]), ("Back", #selector(back), "[", .command), ("Forward", #selector(forward), "]", .command)])
+        add("View", [("Search", #selector(quickSearch), "f", .command), ("Downloaded From", #selector(sources), "j", [.command,.shift]), ("Copy Text", #selector(copyText), "c", [.command,.shift]), ("Inspector", #selector(inspector), "i", .command), ("Grid", #selector(grid), "1", .command), ("List", #selector(list), "2", .command), ("Bigger Cards", #selector(bigger), "+", .command), ("Smaller Cards", #selector(smaller), "-", .command), ("Switch Look", #selector(look), "t", [.command,.control]), ("Duplicates", #selector(duplicates), "d", [.command,.shift]), ("Clean Up", #selector(cleanup), "k", [.command,.shift]), ("Previous Track", #selector(previousTrack), "\u{f702}", .command), ("Next Track", #selector(nextTrack), "\u{f703}", .command), ("Play / Pause", #selector(play), " ", .command), ("Refresh", #selector(refresh), "r", .command), ("Keyboard Shortcuts", #selector(shortcuts), "/", .command)])
+        add("Go", [("Home", #selector(home), "h", [.command,.shift]), ("Go to Folder", #selector(go), "g", [.command,.shift]), ("Edit Path", #selector(editPath), "l", .command), ("Back", #selector(back), "[", .command), ("Forward", #selector(forward), "]", .command)])
         NSApp.mainMenu = main
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if let library, library.previewURL != nil || library.shortcutsPresented || library.onboardingPresented {
+            if [#selector(hide), #selector(quit)].contains(item.action) { return true }
+            if library.onboardingPresented { return false }
+            return [#selector(close), #selector(shortcuts), #selector(preview)].contains(item.action)
+        }
         if item.action == #selector(back) { return library?.canGoBack == true && workspace.interaction.request == nil }
         if item.action == #selector(forward) { return library?.canGoForward == true && workspace.interaction.request == nil }
         return true
@@ -192,7 +196,7 @@ import MacExCore
     @objc func settings() { show(); library?.show(.settings) }
     @objc func sources() { library?.show(.sources) }
     @objc func inspector() { library?.inspector.toggle() }
-    @objc func preview() { if library?.previewURL != nil { library?.previewURL = nil; library?.inspector = false } else if library?.route == .folder || library?.route == .trash { browser?.quickLook?() } else if let path = library?.selected.first { library?.preview(URL(fileURLWithPath: path)) } }
+    @objc func preview() { if library?.previewURL != nil { library?.closePreview() } else if library?.route == .folder || library?.route == .trash { browser?.quickLook?() } else if let path = library?.selected.first { library?.preview(URL(fileURLWithPath: path)) } }
     @objc func copyText() { if library?.route == .folder { library?.copyText(browser?.selected.map(\.url)) } else { library?.copyText() } }
     @objc func grid() { browser?.viewMode = .icons }
     @objc func list() { browser?.viewMode = .list }
@@ -207,13 +211,29 @@ import MacExCore
     @objc func refresh() { if library?.route == .folder || library?.route == .trash { browser?.reload() } else { library?.refresh() } }
     @objc func connect() { show(); library?.show(.servers) }
     @objc func newFolder() { library?.show(.folder); browser?.newFolder() }
-    @objc func rename() { selectFiles(); browser?.rename() }
+    @objc func rename() {
+        guard let library, let browser else { return }
+        if library.route == .folder { browser.rename(); return }
+        guard library.selected.count == 1, let path = library.selected.first, !browser.busy else { return }
+        let url = URL(fileURLWithPath: path)
+        workspace.interaction.ask("Rename", message: "Enter a new name for this item.", initial: url.lastPathComponent, button: "Rename") { [weak browser] name in
+            guard let name else { return }
+            do { try DirectoryReader.validateName(name); browser?.run(OperationRequest(.rename, sources: [url], name: name)) }
+            catch { browser?.errorMessage = error.localizedDescription }
+        }
+    }
     @objc func duplicate() { selectFiles(); browser?.duplicate() }
     @objc func trash() { selectFiles(); browser?.trash() }
+    @objc func shortcuts() { library?.shortcutsPresented.toggle() }
+    @objc func editPath() {
+        guard workspace.interaction.request == nil else { return }
+        library?.closePreview(); library?.show(.folder)
+        DispatchQueue.main.async { NotificationCenter.default.post(name: .macexEditPath, object: nil) }
+    }
     @objc func go() { browser?.goToFolder() }
     @objc func back() { guard workspace.interaction.request == nil else { return }; library?.goBack() }
     @objc func forward() { guard workspace.interaction.request == nil else { return }; library?.goForward() }
-    @objc func close() { if library?.previewURL != nil { library?.previewURL = nil; library?.inspector = false } else { controller?.window?.performClose(nil) } }
+    @objc func close() { if library?.previewURL != nil { library?.closePreview() } else { controller?.window?.performClose(nil) } }
     @objc func hide() { NSApp.hide(nil) }
     @objc func quit() { NSApp.terminate(nil) }
     @objc func about() { library?.show(.settings) }

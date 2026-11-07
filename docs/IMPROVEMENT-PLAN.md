@@ -1,15 +1,17 @@
 # MacEx Improvement Plan
 
 Branch baseline: `ui-refresh` (commits `6305273`, `ad2c275`).
-Created: 2026-11-04. Last updated: 2026-11-06.
+Created: 2026-11-04. Last updated: 2026-11-07.
 
 This plan turns the post-redesign review into ordered, testable work. Each item lists the goal, the approach (with the files it touches), how we know it is done, a rough size (S ≤ half a day, M ≈ 1–2 days, L ≈ 3+ days), and the main risk.
 
 ## Progress
 
-As of 2026-11-06, `main` is at `0d1a794`. These exact commits passed full CI on their branch (build, 128 Swift tests, 53 offline-search tests, 7 UI tests, release package; run 42198641887). The run on `main` itself (42247209597) was still queued when this was written.
+Phase 1 items **7–13 are implemented and locally verified** on `codex/phase1-daily-use`, based on `2868e39`. They are not merged into `main` yet. Final local verification: **96 core tests and 63 app tests passed**, including disposable SFTP fixtures; offline-search checks, the release bundle and the native Xcode UI-test build also passed. Native Xcode UI-test execution remains pending because local Automation Mode is disabled. See [Phase 1 verification](verification/PHASE1-DAILY-USE.md) for evidence, performance measurements and remaining manual/platform checks.
 
-| Done | Item | Merged in |
+The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its subsequent `main` run 42247209597 failed to acquire a hosted runner; no test step ran. This historical infrastructure failure is separate from the Phase 1 local results.
+
+| Done | Item | Integration |
 |---|---|---|
 | ✅ | 1. Merge `ui-refresh` | `31b5d43` (fast-forward) |
 | ✅ | 2. Multi-file drag from Library pages | `dd95527` (PR #1) |
@@ -17,15 +19,16 @@ As of 2026-11-06, `main` is at `0d1a794`. These exact commits passed full CI on 
 | ✅ | 4. Manual interaction checklist written | `dd95527` |
 | ✅ | 5. First library scan about 8× faster | `dd95527` |
 | ✅ | 6. Undo and Redo for move, rename and trash | `0d1a794` |
+| ✅ | 7–13. Remaining Phase 1 features | Implemented on `codex/phase1-daily-use`; merge and CI pending |
 | 🟡 | 27. CI on every push | `564896d`; the required check still needs setting up |
 
 **Open, needs the owner:**
 - Run the manual checklist (`docs/verification/INTERACTION-CHECKLIST.md`) once on a release build. It has not been run yet. The Finder drop for item 2 and ⌘Z after Move to Trash matter most.
 - Make the `macos` check required for `main` (GitHub → Settings → Branches) to finish item 27.
 
-**Next:** items 7 (inline rename), 9 (folder sizes) and 21 (no work while hidden), then the rest of Phase 4.
+**Next:** review/merge Phase 1 and run its pending native/manual UI checks; then item 21 (no work while hidden), followed by Phase 4 items 24–27 before bigger features.
 
-**Installed build:** `/Applications/MacEx.app`, built from `0d1a794` (version string still 0.8.1). Older development copies under `dist/` were moved to the Trash.
+**Builds:** Phase 1 release build is `dist/MacEx.app` (version string remains 0.8.1). `/Applications/MacEx.app` was not replaced; its previously recorded build is `0d1a794`.
 
 ## Principles
 
@@ -40,7 +43,7 @@ As of 2026-11-06, `main` is at `0d1a794`. These exact commits passed full CI on 
 | Phase | Theme | Items | Goal | Status |
 |---|---|---|---|---|
 | 0 | Lock in the redesign | 1–5 | Merge `ui-refresh` safely with verified behavior | Done; manual checklist run pending |
-| 1 | Everyday file management | 6–13 | Make common actions faster and more forgiving | 6 done |
+| 1 | Everyday file management | 6–13 | Make common actions faster and more forgiving | Implemented; 7–13 on feature branch, merge/native UI run pending |
 | 2 | Bigger features | 14–20 | Close the main gaps with modern file managers | Not started |
 | 3 | Performance and resources | 21–23 | Stay fast and light with huge folders and libraries | Not started |
 | 4 | Code health | 24–27 | Keep the codebase easy and safe to change | 27 mostly done |
@@ -127,12 +130,14 @@ As of 2026-11-06, `main` is at `0d1a794`. These exact commits passed full CI on 
   - **Icon view:** add an overlay field on the tile in `FileIcons.swift`.
   - **Behavior:** the field starts with the name selected but not the extension; Esc cancels; validate with `DirectoryReader.validateName`.
 - **Done when:** You can rename in both views without a dialog. Invalid names show an inline error, and a sanity test covers it.
+- **Status (2026-11-07):** Implemented in both native file views. Return and completed slow second clicks edit the existing name field; basename selection, validation, Escape, case-only rename, scroll/reuse, refresh cancellation and real Undo are covered by interaction tests. The field now uses native cell accessibility; external accessibility recheck remains pending. Implemented on `codex/phase1-daily-use`; not merged yet.
 
 ### 8. Editable path bar (⌘L) · S
 
 - **Goal:** Type or paste a path, including `~/…`, to jump there.
 - **Approach:** Pressing ⌘L or clicking an empty part of the breadcrumb (`folderPage` in `LibraryView.swift`) swaps it for a text field. Autocomplete folder names from the current directory, then Return navigates and Esc restores the breadcrumb.
 - **Done when:** ⌘L, typing `~/Downl` and Tab completes to Downloads, and Return opens it.
+- **Status (2026-11-07):** Implemented Command-L and breadcrumb-background editing with literal absolute/relative/tilde paths, folder-only Tab completion, validation and Escape. Fixture tests and a live release-app path-completion/navigation check passed. Implemented on `codex/phase1-daily-use`; not merged yet.
 
 ### 9. Folder sizes and item counts · M
 
@@ -143,24 +148,28 @@ As of 2026-11-06, `main` is at `0d1a794`. These exact commits passed full CI on 
   - **Load:** only visible rows request sizes.
 - **Done when:** Opening a folder fills in folder sizes within about 1 s for typical folders, scrolling stays smooth, and idle CPU stays at about 0% once sizes are done.
 - **Risk:** Deep trees and slow disks. Use utility priority and cancel when the user leaves the folder.
+- **Status (2026-11-07):** Implemented metadata-only cancellable bulk sizing for visible list rows, recursive counts, partial/capped labels, bounded utility workers/cache and descendant event invalidation. The release benchmark measured 5,050 entries in 3.57 ms initially and 2.32–2.77 ms thereafter with a warm filesystem cache. Cold disks, providers and idle CPU remain manual checks. Implemented on `codex/phase1-daily-use`; not merged yet.
 
 ### 10. Better Quick Look · M
 
 - **Goal:** Space opens a large preview you can step through with the arrow keys, with video and audio controls and a full-screen option.
 - **Approach:** Turn the preview pane (`LibraryDetails.swift`) into a resizable overlay mode. The arrow keys follow the current list or grid order, and it reuses `EmbeddedPDF` and `EmbeddedVideo`.
 - **Done when:** Space, the arrow keys and Esc work in folder and Library pages without moving the underlying selection unexpectedly.
+- **Status (2026-11-07):** Implemented a resizable in-window preview with media controls, fill-window mode, arrow navigation in originating display order, online-only skipping and restored focus on close. Underlying selection and file-operation isolation, Inspector metadata and text extraction have regression coverage. Live preview/arrow/fill/Escape checks passed. Implemented on `codex/phase1-daily-use`; not merged yet.
 
 ### 11. Remembered Free Up Space choices · S
 
 - **Goal:** Files you decided to keep stop reappearing.
 - **Approach:** Add "Ignore this file" and "Ignore files like this" (by extension or folder) to the right-click menu of each Free Up Space row. Store the ignore list in `LibrarySettings` (`LibraryModel.swift`) and filter `candidates(_:)` with it. Settings → Library lists the ignored items so they can be restored.
 - **Done when:** An ignored file disappears from every card and survives an app restart.
+- **Status (2026-11-07):** Implemented persisted exact-file, extension and enclosing-folder exclusions across candidate, duplicate and similar-photo cards, with Settings removal. Eligibility changes clear stale picks/reviews. Four real-fixture tests passed; a full context-menu/settings walkthrough remains manual. Implemented on `codex/phase1-daily-use`; not merged yet.
 
 ### 12. Discoverable keyboard shortcuts · S
 
 - **Goal:** Shortcuts are visible where they matter.
 - **Approach:** Add shortcut hints to toolbar tooltips (`Theme.swift` → `ToolbarIconButton`) and to menu items. Add a cheat-sheet overlay on ⌘/ that is generated from the menu definitions in `MacExApp.buildMenu`.
 - **Done when:** ⌘/ shows every shortcut, and the list stays in sync automatically because it comes from the menus.
+- **Status (2026-11-07):** Implemented Command-/ help derived from the actual native menu, file-view gesture hints and matching toolbar help. Hidden/alternate menu entries are excluded. Menu-change regression and live help opening/dismissal passed. Implemented on `codex/phase1-daily-use`; not merged yet.
 
 ### 13. First-launch onboarding and empty states · S
 
@@ -172,6 +181,7 @@ As of 2026-11-06, `main` is at `0d1a794`. These exact commits passed full CI on 
   
   Every empty state (Home with no library, an empty folder, no search results) gets one clear next action.
 - **Done when:** A fresh profile shows onboarding once, and every empty state has a primary button.
+- **Status (2026-11-07):** Implemented three-step onboarding, explicit Done/Skip persistence, legacy-profile migration and actionable empty states. Isolated --state-directory workflow sessions suppress onboarding. Persistence/migration tests passed; a fresh-profile interactive walkthrough remains pending. Implemented on `codex/phase1-daily-use`; not merged yet.
 
 ---
 
@@ -298,7 +308,7 @@ As of 2026-11-06, `main` is at `0d1a794`. These exact commits passed full CI on 
 ## Suggested order
 
 1. ~~Phase 0 (items 1–5), then merge.~~ Done 2026-11-06; only the manual checklist run is pending.
-2. Items 6, 7, 9 and 21: the biggest day-to-day wins for the effort. Item 6 done; 7, 9 and 21 next.
+2. Items 6, 7 and 9 are implemented (7 and 9 on the Phase 1 feature branch). Item 21 is the next implementation priority after Phase 1 review/merge.
 3. Items 24–27 before starting Phase 2, so the large features land on a tidy base.
 4. Phase 2 in the order 15 → 14 → 16 → 17 → 18 → 19 → 20.
 5. Items 22–23 alongside, triggered by measured need.
@@ -306,10 +316,10 @@ As of 2026-11-06, `main` is at `0d1a794`. These exact commits passed full CI on 
 
 ## Tracking
 
-Each item becomes a GitHub issue titled `[Plan #N] <title>` and links back to this document. Tick the items off below as their PRs merge. (No issues have been created yet; progress is tracked here.)
+Each item becomes a GitHub issue titled `[Plan #N] <title>` and links back to this document. Ticks below track implemented work; the Progress table records whether it is merged. Phase 1 items 7–13 are implemented on the feature branch, with pending verification listed in the linked report. (No issues have been created yet; progress is tracked here.)
 
 - [x] 1 · [x] 2 · [x] 3 · [x] 4 (written; first run pending) · [x] 5
-- [x] 6 · [ ] 7 · [ ] 8 · [ ] 9 · [ ] 10 · [ ] 11 · [ ] 12 · [ ] 13
+- [x] 6 · [x] 7 · [x] 8 · [x] 9 · [x] 10 · [x] 11 · [x] 12 · [x] 13
 - [ ] 14 · [ ] 15 · [ ] 16 · [ ] 17 · [ ] 18 · [ ] 19 · [ ] 20
 - [ ] 21 · [ ] 22 · [ ] 23
 - [ ] 24 · [ ] 25 · [ ] 26 · [ ] 27 (all but the required check)

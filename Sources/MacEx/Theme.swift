@@ -70,7 +70,7 @@ struct ToolbarIconButton: View {
                 .frame(width: 28, height: 26)
                 .background(RoundedRectangle(cornerRadius: 7).fill(hovering || active ? Theme.hover : .clear))
                 .contentShape(Rectangle())
-        }.buttonStyle(PressableStyle()).help(help).accessibilityLabel(help)
+        }.buttonStyle(PressableStyle()).help(MenuShortcut.hint(for: help).map { "\(help) (\($0))" } ?? help).accessibilityLabel(help)
             .onHover { hovering = $0 }.animation(Theme.gentle, value: hovering)
     }
 }

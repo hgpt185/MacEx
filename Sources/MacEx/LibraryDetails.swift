@@ -54,14 +54,14 @@ struct StandaloneInlinePreview: View {
             else if let image = state.image { Image(decorative: image, scale: 1).resizable().scaledToFit() }
             else if state.video.currentItem != nil { EmbeddedVideo(player: state.video) }
             else { ContentUnavailableView("Preview unavailable", systemImage: "doc", description: Text(state.error ?? "Unsupported format")) }
-        }.task(id: url) { state.load(url) }.onDisappear { state.video.pause() }
+        }.task(id: url) { state.load(url) }.onDisappear { state.load(nil) }
     }
 }
 
 struct LibraryInspector: View {
     @ObservedObject var model: LibraryModel
     @StateObject private var state = DocumentPreviewState()
-    private var url: URL? { model.previewURL ?? model.activeItem?.url }
+    private var url: URL? { model.activeURL }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
