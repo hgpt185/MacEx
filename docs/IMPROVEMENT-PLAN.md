@@ -7,7 +7,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 
 ## Progress
 
-The next planned work is implemented on `codex/background-code-health`, stacked on Phase 1: **21 (background/battery policy) and 24–27 (code health and required CI)**. Local integrated checks passed: **96 core + 73 app tests**, 27 offline tests, release build and native UI-test build. Review findings were reproduced and fixed. See [background/code-health verification](verification/BACKGROUND-CODE-HEALTH.md) for details and pending platform checks.
+The next planned work is published as [draft PR #3](https://github.com/hgpt185/MacEx/pull/3), implementation commit `78d50ff`, stacked on Phase 1: **21 (background/battery policy) and 24–27 (code health and required CI)**. Local integrated checks passed: **96 core + 73 app tests**, 27 offline tests, release build and native UI-test build. Review findings were reproduced and fixed. See [background/code-health verification](verification/BACKGROUND-CODE-HEALTH.md) for details and pending platform checks.
 
 Phase 1 items **7–13 are implemented and locally verified** on `codex/phase1-daily-use`, based on `2868e39`. Published as [PR #2](https://github.com/hgpt185/MacEx/pull/2), implementation commit `7a1f1ef`; not merged into `main` yet. Final local verification: **96 core tests and 63 app tests passed**, including disposable SFTP fixtures; offline-search checks, the release bundle and the native Xcode UI-test build also passed. Local native UI execution is blocked by disabled Automation Mode; CI run 42343909326 exposed two macOS 15 follow-up cases addressed on the continuation branch and awaiting CI retest. See [Phase 1 verification](verification/PHASE1-DAILY-USE.md) for evidence, performance measurements and remaining manual/platform checks.
 
@@ -22,8 +22,8 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 | ✅ | 5. First library scan about 8× faster | `dd95527` |
 | ✅ | 6. Undo and Redo for move, rename and trash | `0d1a794` |
 | ✅ | 7–13. Remaining Phase 1 features | [PR #2](https://github.com/hgpt185/MacEx/pull/2), `7a1f1ef`; merge and CI pending |
-| ✅ | 21. Background and battery-aware watching | `codex/background-code-health`; merge pending |
-| ✅ | 24–26. View extraction, public settings layout, file-effect services | `codex/background-code-health`; merge pending |
+| ✅ | 21. Background and battery-aware watching | [PR #3](https://github.com/hgpt185/MacEx/pull/3); merge pending |
+| ✅ | 24–26. View extraction, public settings layout, file-effect services | [PR #3](https://github.com/hgpt185/MacEx/pull/3); merge pending |
 | ✅ | 27. CI on every push and required `macos` check | `main` protection configured and verified; skipped-check naming fix on continuation branch |
 
 **Open, needs the owner:**
