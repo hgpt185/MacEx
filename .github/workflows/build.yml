@@ -56,9 +56,13 @@ jobs:
           assert key not in entitlements('.build/ui-tests/Build/Products/Debug/MacEx.app')
           print('Verified sandboxed test runner has only dedicated fixture write access; app has no fixture entitlement.')
           PY
-          xcodebuild -project MacEx.xcodeproj -scheme MacEx -configuration Debug \
+          if ! xcodebuild -project MacEx.xcodeproj -scheme MacEx -configuration Debug \
             -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/ui-tests \
-            -resultBundlePath .build/single-window.xcresult test-without-building
+            -resultBundlePath .build/single-window.xcresult test-without-building; then
+            xcrun xcresulttool export diagnostics --path .build/single-window.xcresult --output-path .build/ui-diagnostics
+            find .build/ui-diagnostics -name 'StandardOutputAndStandardError-local.macex.app.uihost.txt' -exec cat {} \;
+            exit 1
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

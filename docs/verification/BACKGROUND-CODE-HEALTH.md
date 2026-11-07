@@ -53,3 +53,7 @@ Eight focused background tests passed after review fixes. Final integrated comma
 - Required `main` protection: API read-back confirmed `macos`, GitHub Actions app ID 15368, strict mode and administrator enforcement.
 
 Physical/manual resource validation remains pending. Local native UI execution is unavailable; the required `macos` CI result on PR #2 records native execution and universal preview packaging.
+
+## Merge-gate follow-up
+
+Run [42348920348](https://github.com/hgpt185/MacEx/actions/runs/42348920348) passed service/offline checks and 10 of 11 native UI tests, including path editing, shortcuts and hide/return catch-up. List-view rename cancellation passed; switching to icon view then trapped on a background thread with a main-queue assertion. The same sequence passed in the local debug and release apps. Full noninteractive Swift crash output is enabled for the next CI run to identify the callback before changing production behavior. Main integration remains gated on a successful required check.
