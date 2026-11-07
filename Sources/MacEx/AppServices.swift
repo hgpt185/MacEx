@@ -10,11 +10,13 @@ final class AppWorkspace: ObservableObject {
     var openRemote: ((SFTPConnection, String, Bool) -> Void)?
     var knownHosts: SSHKnownHosts?
     var changed: (() -> Void)?
+    let clipboard: ClipboardService
     let interaction = InAppInteraction()
     let jobs = SharedJobs()
     let cleanup = CleanupModel()
     let localIndex = LocalIndexModel()
-    init() {
+    init(clipboard: ClipboardService = .general) {
+        self.clipboard = clipboard
         let home = FileManager.default.homeDirectoryForCurrentUser
         let defaults = [("Home", "house", home), ("Desktop", "desktopcomputer", home.appendingPathComponent("Desktop")),
                         ("Documents", "doc.text", home.appendingPathComponent("Documents")), ("Downloads", "arrow.down.circle", home.appendingPathComponent("Downloads")),

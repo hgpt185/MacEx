@@ -18,6 +18,8 @@ concurrency:
 
 jobs:
   macos:
+    # A skipped same-repository PR job must not share the required push check's name.
+    name: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'macos (covered by push)' || 'macos' }}
     # Same-repository PRs are already covered by the push run of their branch.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: macos-15

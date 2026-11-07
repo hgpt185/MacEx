@@ -83,8 +83,10 @@ struct FileTable: NSViewRepresentable {
                 guard let self else { return }
                 if let url { table?.beginRename(url) } else { table?.endRename() }
             }
-            folderObserver = model.$location.removeDuplicates().sink { [weak self] url in
+            folderObserver = model.$location.combineLatest(model.$isVisible).sink { [weak self] url, visible in
                 guard let self else { return }
+                folderEvents = nil
+                guard visible else { FolderSizes.shared.cancelAll(); return }
                 folderEvents = try? IndexEvents(roots: [url.path]) { [weak self] in
                     Task { @MainActor [weak self] in self?.model.scheduleRefresh() }
                 }
@@ -156,7 +158,7 @@ struct FileTable: NSViewRepresentable {
                     cell.imageView?.contentTintColor = .secondaryLabelColor
                 } else {
                     let key = entry.url.pathExtension.lowercased()
-                    let icon = icons[key] ?? NSWorkspace.shared.icon(for: UTType(filenameExtension: key) ?? .data)
+                    let icon = icons[key] ?? SystemFileServices.icon(for: UTType(filenameExtension: key) ?? .data)
                     if icons.count < 128 { icons[key] = icon }
                     cell.imageView?.image = icon; cell.imageView?.contentTintColor = nil
                 }

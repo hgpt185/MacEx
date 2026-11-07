@@ -8,21 +8,22 @@ import MacExCore
         let name: String
         let editable: Bool, selectable: Bool, bezeled: Bool, bordered: Bool, background: Bool
         let focus: NSFocusRingType, lines: Int
-        let identifier: String?, label: String?, help: String?, role: NSAccessibility.Role?
+        let identifier: String?, label: String?, help: String?
         let delegate: (any NSTextFieldDelegate)?
         init(_ field: NSTextField) {
             name = field.stringValue; editable = field.isEditable; selectable = field.isSelectable
             bezeled = field.isBezeled; bordered = field.isBordered; background = field.drawsBackground
             focus = field.focusRingType; lines = field.maximumNumberOfLines
             identifier = field.accessibilityIdentifier(); label = field.accessibilityLabel(); help = field.accessibilityHelp()
-            role = field.accessibilityRole(); delegate = field.delegate
+            delegate = field.delegate
         }
         func restore(_ field: NSTextField) {
             field.stringValue = name; field.isEditable = editable; field.isSelectable = selectable
             field.isBezeled = bezeled; field.isBordered = bordered; field.drawsBackground = background
             field.focusRingType = focus; field.maximumNumberOfLines = lines
             field.setAccessibilityIdentifier(identifier); field.setAccessibilityLabel(label); field.setAccessibilityHelp(help)
-            field.setAccessibilityRole(role); field.delegate = delegate
+            // Clear the editing override so AppKit derives the read-only label role again.
+            field.setAccessibilityRole(nil); field.delegate = delegate
         }
     }
     private weak var model: BrowserModel?
@@ -68,7 +69,7 @@ import MacExCore
         field?.delegate = nil
         // End native editing before restoring the old value so cancelled editor text cannot overwrite it.
         if edited, let host { host.window?.makeFirstResponder(host) }
-        if let field { state?.restore(field) }
+        if let field { state?.restore(field); NSAccessibility.post(element: field, notification: .valueChanged) }
         errorLabel?.removeFromSuperview()
         accessibilityContainer?.setAccessibilityChildren(nil); accessibilityContainer?.setAccessibilityRole(.cell)
         if field != nil, let host { NSAccessibility.post(element: host, notification: .layoutChanged) }

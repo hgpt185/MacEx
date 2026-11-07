@@ -35,14 +35,10 @@ private struct FolderPathEditor: NSViewRepresentable {
     let cancel: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField(string: directory.path)
+        let field = FolderPathTextField(string: directory.path)
         field.delegate = context.coordinator; field.isEditable = true; field.isSelectable = true
         field.font = .systemFont(ofSize: 13); field.bezelStyle = .roundedBezel
         field.setAccessibilityLabel("Folder path"); field.setAccessibilityIdentifier("folder-path-input")
-        DispatchQueue.main.async { [weak field] in
-            guard let field, field.window != nil else { return }
-            field.window?.makeFirstResponder(field); field.selectText(nil)
-        }
         return field
     }
     func updateNSView(_ field: NSTextField, context: Context) { context.coordinator.parent = self }
@@ -70,6 +66,20 @@ private struct FolderPathEditor: NSViewRepresentable {
                 } catch { if generation == token { parent.error = error.localizedDescription } }
             }
             return true
+        }
+    }
+}
+
+/// SwiftUI may attach the representable after makeNSView's next actor turn on older macOS releases.
+/// Request focus only once the field actually has a window, so Command-L is usable from the keyboard.
+@MainActor final class FolderPathTextField: NSTextField {
+    private var focusedInitially = false
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, !focusedInitially else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window, !self.focusedInitially else { return }
+            if window.makeFirstResponder(self) { self.focusedInitially = true; self.selectText(nil) }
         }
     }
 }

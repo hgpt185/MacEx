@@ -7,7 +7,9 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 
 ## Progress
 
-Phase 1 items **7–13 are implemented and locally verified** on `codex/phase1-daily-use`, based on `2868e39`. Published as [PR #2](https://github.com/hgpt185/MacEx/pull/2), implementation commit `7a1f1ef`; not merged into `main` yet. Final local verification: **96 core tests and 63 app tests passed**, including disposable SFTP fixtures; offline-search checks, the release bundle and the native Xcode UI-test build also passed. Native Xcode UI-test execution remains pending because local Automation Mode is disabled. See [Phase 1 verification](verification/PHASE1-DAILY-USE.md) for evidence, performance measurements and remaining manual/platform checks.
+The next planned work is implemented on `codex/background-code-health`, stacked on Phase 1: **21 (background/battery policy) and 24–27 (code health and required CI)**. Local integrated checks passed: **96 core + 73 app tests**, 27 offline tests, release build and native UI-test build. Review findings were reproduced and fixed. See [background/code-health verification](verification/BACKGROUND-CODE-HEALTH.md) for details and pending platform checks.
+
+Phase 1 items **7–13 are implemented and locally verified** on `codex/phase1-daily-use`, based on `2868e39`. Published as [PR #2](https://github.com/hgpt185/MacEx/pull/2), implementation commit `7a1f1ef`; not merged into `main` yet. Final local verification: **96 core tests and 63 app tests passed**, including disposable SFTP fixtures; offline-search checks, the release bundle and the native Xcode UI-test build also passed. Local native UI execution is blocked by disabled Automation Mode; CI run 42343909326 exposed two macOS 15 follow-up cases addressed on the continuation branch and awaiting CI retest. See [Phase 1 verification](verification/PHASE1-DAILY-USE.md) for evidence, performance measurements and remaining manual/platform checks.
 
 The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its subsequent `main` run 42247209597 failed to acquire a hosted runner; no test step ran. This historical infrastructure failure is separate from the Phase 1 local results.
 
@@ -20,15 +22,17 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 | ✅ | 5. First library scan about 8× faster | `dd95527` |
 | ✅ | 6. Undo and Redo for move, rename and trash | `0d1a794` |
 | ✅ | 7–13. Remaining Phase 1 features | [PR #2](https://github.com/hgpt185/MacEx/pull/2), `7a1f1ef`; merge and CI pending |
-| 🟡 | 27. CI on every push | `564896d`; the required check still needs setting up |
+| ✅ | 21. Background and battery-aware watching | `codex/background-code-health`; merge pending |
+| ✅ | 24–26. View extraction, public settings layout, file-effect services | `codex/background-code-health`; merge pending |
+| ✅ | 27. CI on every push and required `macos` check | `main` protection configured and verified; skipped-check naming fix on continuation branch |
 
 **Open, needs the owner:**
 - Run the manual checklist (`docs/verification/INTERACTION-CHECKLIST.md`) once on a release build. It has not been run yet. The Finder drop for item 2 and ⌘Z after Move to Trash matter most.
-- Make the `macos` check required for `main` (GitHub → Settings → Branches) to finish item 27.
+- Native CI must execute the follow-up path-focus/rename-label cases. Phase 1 run 42343909326 exposed those macOS 15 failures; fixes are on the continuation branch. Required `macos` protection is now configured on `main`.
 
-**Next:** review/merge Phase 1 and run its pending native/manual UI checks; then item 21 (no work while hidden), followed by Phase 4 items 24–27 before bigger features.
+**Next:** review/merge the continuation into Phase 1, then PR #2 into `main` after required CI is green. Complete the pending manual release checks. Next feature work is Phase 2, starting with item 15 (Workspaces), then 14 (split pane). Items 22–23 remain driven by measured need.
 
-**Builds:** Phase 1 release build is `dist/MacEx.app` (version string remains 0.8.1). `/Applications/MacEx.app` was not replaced; its previously recorded build is `0d1a794`.
+**Builds:** The background/code-health continuation release build is `dist/MacEx.app` (version string remains 0.8.1). `/Applications/MacEx.app` was not replaced; its previously recorded build is `0d1a794`.
 
 ## Principles
 
@@ -45,8 +49,8 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 | 0 | Lock in the redesign | 1–5 | Merge `ui-refresh` safely with verified behavior | Done; manual checklist run pending |
 | 1 | Everyday file management | 6–13 | Make common actions faster and more forgiving | Implemented; 7–13 on feature branch, merge/native UI run pending |
 | 2 | Bigger features | 14–20 | Close the main gaps with modern file managers | Not started |
-| 3 | Performance and resources | 21–23 | Stay fast and light with huge folders and libraries | Not started |
-| 4 | Code health | 24–27 | Keep the codebase easy and safe to change | 27 mostly done |
+| 3 | Performance and resources | 21–23 | Stay fast and light with huge folders and libraries | 21 implemented on continuation branch; 22–23 remain |
+| 4 | Code health | 24–27 | Keep the codebase easy and safe to change | Implemented; merge/CI pending, main required check configured |
 | 5 | Distribution and accessibility | 28–29 | Install cleanly and work for everyone | Not started |
 
 ---
@@ -241,6 +245,7 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 - **Goal:** Zero work while MacEx is hidden, and less work on battery.
 - **Approach:** Pause library rescans and the `IndexEvents` watcher when the window is hidden or the app is in the background, and catch up once on return. On battery, lengthen the rescan debounce from 3 s to 30 s.
 - **Done when:** Activity Monitor shows 0% CPU and no wakeups while hidden, and one catch-up rescan runs on return.
+- **Status (2026-11-07):** Implemented coalesced activity-aware library/index refresh, native power notifications, suspended watchers/rule timers and foreground catch-up. Library/index delays are 3 seconds on AC and 30 seconds on battery; folder events retain 200 ms AC responsiveness and use 30 seconds on battery. Explicit transfers/playback continue. Eight focused regressions cover cancellation, rapid return, late callbacks, opt-in and Stop intent. Physical battery and idle CPU/wakeup measurement remain manual. Implemented on `codex/background-code-health`; not merged yet.
 
 ### 22. Right-sized thumbnails · S
 
@@ -263,25 +268,28 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 - **Goal:** No view file over about 400 lines.
 - **Approach:** Move each page (Home, Files, Folder, Duplicates, Connections) and the sidebar and toolbar into their own files under `Sources/MacEx/Pages/`. Behavior stays exactly the same.
 - **Done when:** The build and all tests pass, and the diff only moves code.
+- **Status (2026-11-07):** Extracted the 776-line library view into a 99-line shell and focused Pages extensions (largest 126 lines). Thumbnail and drag-event support are separate; SwiftUI state stays on the window shell and Xcode references are updated. Existing real-window interactions and page rendering pass. Implemented on `codex/background-code-health`; not merged yet.
 
 ### 25. Remove the private `_VariadicView` API · S
 
 - **Goal:** No dependence on underscored SwiftUI API.
 - **Approach:** Replace `SettingsGroup`'s separator layout (`LibrarySettingsView.swift`) with explicit separators passed by each section, or with `Group(subviews:)` behind `#available(macOS 15, *)` and a fallback for older systems.
 - **Done when:** `grep -r _VariadicView Sources` finds nothing.
+- **Status (2026-11-07):** Removed every `_VariadicView` reference. Public SwiftUI stacks, one-point separator gaps and row backgrounds provide the same implementation on macOS 14 and newer. Release and native host builds pass. Implemented on `codex/background-code-health`; not merged yet.
 
 ### 26. One path for side effects · S
 
 - **Goal:** Views never call `NSWorkspace` or `NSPasteboard` directly.
 - **Approach:** Route opening through `FileOpener` (already done), and pasteboard writes and "reveal in folder" through small services that can be swapped out in tests.
 - **Done when:** A grep shows these calls only inside the service types, and the tests cover copy-path and reveal.
+- **Status (2026-11-07):** Centralized opening, native icons, clipboard and workspace notifications in SystemFileServices.swift; reveal stays inside MacEx and selects the loaded file. Isolated clipboard and real-filesystem reveal tests pass, including filesystem aliases. Implemented on `codex/background-code-health`; not merged yet.
 
 ### 27. Continuous integration · S
 
 - **Goal:** Every push runs the build and tests.
 - **Approach:** Extend `.github/workflows/build.yml` to run `swift test`, including `InteractionSanityTests`, on a macOS runner and upload the logs if anything fails.
 - **Done when:** PRs show a required green check.
-- **Status (2026-11-06):** The workflow now runs on every push to any branch. A newer push cancels the older run on the same branch; manual runs are never cancelled. Same-repository PRs use their branch's push run instead of a duplicate. The Swift test log is uploaded when that step fails, and the UI result bundle is always uploaded. It also runs `InteractionSanityTests` (part of `swift test`) and the UI suite. **Left for the owner:** make the `macos` check required for `main` (GitHub → Settings → Branches), which needs admin rights. Then tick this item.
+- **Status (2026-11-06):** The workflow now runs on every push to any branch. A newer push cancels the older run on the same branch; manual runs are never cancelled. Same-repository PRs use their branch's push run instead of a duplicate. The Swift test log is uploaded when that step fails, and the UI result bundle is always uploaded. It also runs `InteractionSanityTests` (part of `swift test`) and the UI suite. **Completed 2026-11-07:** the `macos` GitHub Actions check (app ID 15368) is required on `main`, with strict/up-to-date checks and administrator enforcement. API read-back confirmed it. The continuation workflow gives skipped duplicate PR jobs a different name so they cannot substitute for the real build. New branch CI still must pass before merging.
 
 ---
 
@@ -308,8 +316,8 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 ## Suggested order
 
 1. ~~Phase 0 (items 1–5), then merge.~~ Done 2026-11-06; only the manual checklist run is pending.
-2. Items 6, 7 and 9 are implemented (7 and 9 on the Phase 1 feature branch). Item 21 is the next implementation priority after Phase 1 review/merge.
-3. Items 24–27 before starting Phase 2, so the large features land on a tidy base.
+2. Items 6, 7 and 9 are implemented (7 and 9 on the Phase 1 feature branch). Item 21 is now implemented on the continuation branch.
+3. Items 24–27 are implemented on the continuation branch; review/merge them before Phase 2.
 4. Phase 2 in the order 15 → 14 → 16 → 17 → 18 → 19 → 20.
 5. Items 22–23 alongside, triggered by measured need.
 6. Phase 5 before the next public release.
@@ -321,6 +329,6 @@ Each item becomes a GitHub issue titled `[Plan #N] <title>` and links back to th
 - [x] 1 · [x] 2 · [x] 3 · [x] 4 (written; first run pending) · [x] 5
 - [x] 6 · [x] 7 · [x] 8 · [x] 9 · [x] 10 · [x] 11 · [x] 12 · [x] 13
 - [ ] 14 · [ ] 15 · [ ] 16 · [ ] 17 · [ ] 18 · [ ] 19 · [ ] 20
-- [ ] 21 · [ ] 22 · [ ] 23
-- [ ] 24 · [ ] 25 · [ ] 26 · [ ] 27 (all but the required check)
+- [x] 21 · [ ] 22 · [ ] 23
+- [x] 24 · [x] 25 · [x] 26 · [x] 27 (required check configured; workflow change pending merge)
 - [ ] 28 · [ ] 29

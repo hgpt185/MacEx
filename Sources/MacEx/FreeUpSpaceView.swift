@@ -185,7 +185,7 @@ struct FreeUpSpaceView: View {
                 }.contextMenu {
                     Button("Open") { FileOpener.open(item.url) }
                     Button("Quick Look") { model.preview(item.url, order: items.map(\.url)) }
-                    Button("Show in Enclosing Folder") { model.openFolder(item.url.deletingLastPathComponent()) }
+                    Button("Show in Enclosing Folder") { FileNavigation.reveal(item.url, in: model.browser) }
                     CleanupIgnoreMenu(model: model, url: item.url)
                 }
             }
@@ -230,7 +230,7 @@ struct FreeUpSpaceView: View {
                                 }.contextMenu {
                                     Button("Open") { FileOpener.open(file.url) }
                                     Button("Quick Look") { model.preview(file.url, order: group.files.map(\.url)) }
-                                    Button("Show in Enclosing Folder") { model.openFolder(file.url.deletingLastPathComponent()) }
+                                    Button("Show in Enclosing Folder") { FileNavigation.reveal(file.url, in: model.browser) }
                                     CleanupIgnoreMenu(model: model, url: file.url)
                                 }
                             }

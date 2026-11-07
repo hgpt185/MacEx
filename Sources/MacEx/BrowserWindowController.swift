@@ -7,6 +7,7 @@ import MacExCore
 final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     let model: BrowserModel
     let library: LibraryModel
+    private var activity: ApplicationActivity?
     init(model: BrowserModel, library: LibraryModel) {
         self.model = model; self.library = library
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 820), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -15,6 +16,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window); window.delegate = self; model.window = window
         window.contentView = FirstMouseHostingView(rootView: SingleWindowView(model: library, browser: model, interaction: model.workspace.interaction))
         window.center()
+        activity = ApplicationActivity(window: window, library: library)
     }
     required init?(coder: NSCoder) { nil }
     override func newWindowForTab(_ sender: Any?) { window?.makeKeyAndOrderFront(nil) }
@@ -22,7 +24,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { model.workspace.jobs.undo.manager }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if model.busy { model.showingOperations = true; return false }
-        library.previewURL = nil; sender.orderOut(nil); return false
+        library.closePreview(); sender.orderOut(nil); activity?.update(); return false
     }
 }
 

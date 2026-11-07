@@ -141,10 +141,10 @@ import MacExCore
                 let editing = (self.controller?.window?.firstResponder as? NSTextView)?.isEditable == true
                 if editing { return false }
                 if event.modifierFlags.contains(.command) && event.modifierFlags.intersection([.shift, .option, .control]).isEmpty && library.route != .folder && library.route != .trash {
-                    if event.keyCode == 8 { NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects(library.selected.map { NSURL(fileURLWithPath: $0) }); return true }
+                    if event.keyCode == 8 { self.workspace.clipboard.writeURLs(library.selected.map { URL(fileURLWithPath: $0) }); return true }
                     if event.keyCode == 0 { library.selected = Set(library.items.map(\.path)); return true }
                     if event.keyCode == 9 {
-                        let urls = NSPasteboard.general.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+                        let urls = self.workspace.clipboard.fileURLs
                         if !urls.isEmpty { library.transfer(urls, move: false) }; return true
                     }
                 }

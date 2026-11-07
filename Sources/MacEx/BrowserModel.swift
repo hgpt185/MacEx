@@ -87,6 +87,7 @@ final class BrowserModel: ObservableObject {
     private var loadControl: JobControl?
     private var watcher: DirectoryWatcher?
     private var refreshTask: Task<Void, Never>?
+    private var onBattery = false
     private var generation = UUID()
     private var searchToken = UUID()
     private var searchControl: JobControl?
@@ -119,7 +120,7 @@ final class BrowserModel: ObservableObject {
             guard let self, isVisible else { return }; reload()
         }.store(in: &subscriptions)
         refreshVolumes()
-        volumeObservers = VolumeObservers(center: NSWorkspace.shared.notificationCenter) { [weak self] in
+        volumeObservers = VolumeObservers(center: SystemFileServices.notificationCenter) { [weak self] in
             Task { @MainActor [weak self] in self?.refreshVolumes() }
         }
     }
@@ -138,7 +139,7 @@ final class BrowserModel: ObservableObject {
     func setVisible(_ visible: Bool) {
         guard isVisible != visible else { return }
         isVisible = visible
-        if visible { reload() } else { FolderSizes.shared.cancelAll(); cancelRename(); watcher = nil; loadControl?.cancel(); refreshTask?.cancel() }
+        if visible { reload() } else { FolderSizes.shared.cancelAll(); cancelRename(); watcher = nil; loadControl?.cancel(); refreshTask?.cancel(); refreshTask = nil }
     }
 
     func refreshVolumes() {
@@ -165,6 +166,7 @@ final class BrowserModel: ObservableObject {
     func parent() { guard location.path != "/" else { return }; navigate(location.deletingLastPathComponent()) }
 
     func reload() {
+        refreshTask?.cancel(); refreshTask = nil
         guard !searchActive else { return }
         cancelRename()
         FolderSizes.shared.clear()
@@ -192,7 +194,7 @@ final class BrowserModel: ObservableObject {
                 if options == filterOptions { setVisible(visible) } else { applyFilter() }
                 isLoading = false
                 if let revealAfterLoad {
-                    if entries.contains(where: { $0.url == revealAfterLoad }) { selection = [revealAfterLoad] }
+                    if let entry = entries.first(where: { SearchScope.canonicalPath($0.url.path) == SearchScope.canonicalPath(revealAfterLoad.path) }) { selection = [entry.url] }
                     self.revealAfterLoad = nil
                 }
                 if watcher == nil && isVisible {
@@ -207,11 +209,19 @@ final class BrowserModel: ObservableObject {
             }
         }
     }
+    func setResourcePolicy(onBattery: Bool) {
+        guard self.onBattery != onBattery else { return }
+        self.onBattery = onBattery
+        if refreshTask != nil { scheduleRefresh() }
+    }
     func scheduleRefresh() {
-        refreshTask?.cancel()
+        refreshTask?.cancel(); refreshTask = nil
+        guard isVisible else { return }
+        let delay: Duration = onBattery ? .seconds(30) : .milliseconds(200)
         refreshTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(200))
-            guard !Task.isCancelled else { return }; self?.reload()
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard let self, self.isVisible, !Task.isCancelled else { return }
+            self.refreshTask = nil; self.reload()
         }
     }
     struct FilterOptions: Equatable, Sendable {
@@ -256,7 +266,7 @@ final class BrowserModel: ObservableObject {
     func openWith(_ application: URL? = nil) {
         let files = selected.filter { !$0.isFolder }.map(\.url)
         guard let application, !files.isEmpty else { openSelection(); return }
-        NSWorkspace.shared.open(files, withApplicationAt: application, configuration: NSWorkspace.OpenConfiguration())
+        SystemFileServices.open(files, with: application)
     }
     func pinCurrentFolder() { workspace.pin(location) }
     func pinSelectedFolders() { for entry in selected where entry.isFolder { workspace.pin(entry.url) } }
@@ -321,16 +331,15 @@ final class BrowserModel: ObservableObject {
     func copySelection() {
         clipboardURLs = selected.map(\.url)
         guard !clipboardURLs.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.writeObjects(clipboardURLs as [NSURL])
-        workspace.jobs.copiedPasteboardChange = NSPasteboard.general.changeCount
+        workspace.clipboard.writeURLs(clipboardURLs)
+        workspace.jobs.copiedPasteboardChange = workspace.clipboard.changeCount
     }
     func paste(move: Bool = false) {
         guard !busy else { return }
-        if move && NSPasteboard.general.changeCount != workspace.jobs.copiedPasteboardChange {
+        if move && workspace.clipboard.changeCount != workspace.jobs.copiedPasteboardChange {
             errorMessage = "Copy items in MacEx before using Move Here. Items copied in another app can be pasted as copies."; return
         }
-        let urls = NSPasteboard.general.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        let urls = workspace.clipboard.fileURLs
         guard !urls.isEmpty else { return }
         transfer(urls, to: location, move: move)
     }
@@ -344,8 +353,7 @@ final class BrowserModel: ObservableObject {
     }
 
     func copyPaths() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(selected.map(\.url.path).joined(separator: "\n"), forType: .string)
+        workspace.clipboard.writePaths(selected.map(\.url))
     }
 
     func run(_ request: OperationRequest) {
@@ -410,11 +418,10 @@ final class BrowserModel: ObservableObject {
         searchRunning = false
         searchSummary = "Search cancelled. An unfinished Spotlight result is not treated as a complete answer."
     }
+    func selectOnNextLoad(_ url: URL) { revealAfterLoad = url }
     func revealInEnclosingFolder() {
         guard searchActive, selection.count == 1, let url = selection.first else { return }
-        let parent = url.deletingLastPathComponent()
-        navigate(parent)
-        revealAfterLoad = url
+        FileNavigation.reveal(url, in: self)
     }
     func renameSavedSearch(_ search: SavedSearch) {
         prompt(title: "Rename Search", message: "This changes the sidebar label only.", initial: search.title, button: "Rename") { [weak self] name in
@@ -490,18 +497,6 @@ final class BrowserModel: ObservableObject {
         searchCoverage = nil
         searchControl = nil
     }
-}
-
-private final class VolumeObservers {
-    private let center: NotificationCenter
-    private var tokens: [NSObjectProtocol] = []
-    init(center: NotificationCenter, changed: @escaping @Sendable () -> Void) {
-        self.center = center
-        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification, NSWorkspace.didRenameVolumeNotification] {
-            tokens.append(center.addObserver(forName: name, object: nil, queue: .main) { _ in changed() })
-        }
-    }
-    deinit { for token in tokens { center.removeObserver(token) } }
 }
 
 private final class DirectoryWatcher {

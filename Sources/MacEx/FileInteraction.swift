@@ -4,7 +4,7 @@ import MacExCore
 @MainActor
 enum FileDrag {
     static func urls(_ info: any NSDraggingInfo) -> [URL] {
-        info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        ClipboardService(pasteboard: info.draggingPasteboard).fileURLs
     }
     static func validate(_ info: any NSDraggingInfo, model: BrowserModel, destination: URL) -> NSDragOperation {
         guard !model.busy, !urls(info).isEmpty else { model.dropHint = nil; return [] }
@@ -47,7 +47,7 @@ final class FileMenuActions: NSObject {
             menu.addItem(.separator()); add("Move to Trash…", #selector(trash), enabled: !model.busy)
         } else {
             add("New Folder…", #selector(newFolder), enabled: !model.busy)
-            add("Paste", #selector(paste), enabled: !model.busy && NSPasteboard.general.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]))
+            add("Paste", #selector(paste), enabled: !model.busy && model.workspace.clipboard.canReadFiles)
             add("Add Current Folder to Sidebar", #selector(pinCurrent))
         }
         return menu

@@ -163,6 +163,12 @@ final class LibraryModel: ObservableObject {
     private var endObserver: NSObjectProtocol?
     private var subscriptions = Set<AnyCancellable>()
     private var scanControl: JobControl?
+    private(set) var activityActive = true
+    private var refreshAfterScan = false
+    private lazy var automaticRefresh = AutomaticRefresh { [weak self] in
+        guard let self, self.canWrite else { return }
+        self.refresh()
+    }
     private var searchTask: Task<Void, Never>?
     private var watcher: IndexEvents?
     private var watchedRoots: [String] = []
@@ -321,7 +327,7 @@ final class LibraryModel: ObservableObject {
                 trashHistory = Array((data.2 ?? []).suffix(500))
                 onSettingsChanged?(); startRuleTimer(); updates.configure(directory: directory)
                 save()
-                loaded = true
+                loaded = true; startRuleTimer()
                 if !discoveryRoots.isEmpty { refresh() }
             } catch { canWrite = false; status = "Saved library preserved: \(error.localizedDescription)"; loaded = true }
         }
@@ -332,7 +338,7 @@ final class LibraryModel: ObservableObject {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let url = directory.appendingPathComponent("library-settings.json")
             try JSONEncoder().encode(settings).write(to: url, options: .atomic); try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            onSettingsChanged?()
+            onSettingsChanged?(); startRuleTimer()
         } catch { status = error.localizedDescription }
     }
     func addFolder() { chooseFolderForLibrary(asRuleFolder: false) }
@@ -374,7 +380,9 @@ final class LibraryModel: ObservableObject {
     }
     func refresh() {
         // Startup reconciliation covers notifications received before saved roots load.
-        guard loaded, !scanning else { return }
+        guard loaded else { return }
+        guard activityActive else { automaticRefresh.request(); return }
+        guard !scanning else { refreshAfterScan = true; return }
         let paths = discoveryRoots
         guard !paths.isEmpty else {
             snapshot = LibrarySnapshot(roots: [], complete: true)
@@ -389,15 +397,17 @@ final class LibraryModel: ObservableObject {
             let result = await Task.detached(priority: .utility) { LibraryScanner.scan(roots: roots, control: control, previous: previous) { count in
                 // Throttled: each status change redraws the window, and incremental rescans report thousands of files per second.
                 guard count.isMultiple(of: 1_000) else { return }
-                Task { @MainActor [weak receiver] in if receiver?.scanning == true { receiver?.status = "Found \(count.formatted()) files…" } }
+                Task { @MainActor [weak receiver] in if receiver?.activityActive == true, receiver?.scanning == true { receiver?.status = "Found \(count.formatted()) files…" } }
             } }.value
             if !control.isCancelled { snapshot = result; workspace.cleanup.invalidateCatalog(); persistSnapshot(); onSettingsChanged?() }
             scanning = false; scanControl = nil
             status = control.isCancelled ? "Refresh stopped. Previous library retained." : "\(result.items.count.formatted()) files · \(result.skipped) excluded\(result.complete ? "" : " · partial coverage; check folder access or limits") · online-only contents stay undownloaded"
+            guard activityActive else { return }
+            if refreshAfterScan { refreshAfterScan = false; refresh(); return }
             if watchedRoots != paths { watcher = nil; watchedRoots = paths }
             if watcher == nil { watcher = try? IndexEvents(roots: paths) { [weak self] in Task { @MainActor [weak self] in self?.scheduleRefresh() } } }
             if !control.isCancelled, settings.recognizeText, !workspace.localIndex.running {
-                workspace.localIndex.roots = recognitionRoots; workspace.localIndex.start()
+                workspace.localIndex.roots = recognitionRoots; workspace.localIndex.start(automatically: true)
             }
             if !searchText.isEmpty { search(searchText) }
         }
@@ -407,7 +417,26 @@ final class LibraryModel: ObservableObject {
         workspace.cleanup.roots = discoveryRoots.map { URL(fileURLWithPath: $0, isDirectory: true) }
         workspace.cleanup.start(catalog: snapshot.items)
     }
-    func scheduleRefresh() { refreshTask?.cancel(); refreshTask = Task { [weak self] in do { try await Task.sleep(for: .seconds(3)) } catch { return }; self?.refresh() } }
+    func setTextRecognition(_ enabled: Bool) {
+        settings.recognizeText = enabled
+        if enabled { workspace.localIndex.allowAutomaticIndexing(); refresh() }
+        else { workspace.localIndex.stop() }
+        save()
+    }
+    func scheduleRefresh() { automaticRefresh.request() }
+    func setActivity(active: Bool, onBattery: Bool) {
+        let changed = activityActive != active
+        activityActive = active
+        if changed && !active {
+            scanControl?.cancel(); watcher = nil; watchedRoots = []
+            timer?.invalidate(); timer = nil; refreshTask?.cancel(); refreshTask = nil
+        }
+        workspace.localIndex.setActivity(active: active, onBattery: onBattery)
+        browser.setResourcePolicy(onBattery: onBattery)
+        if changed { browser.setVisible(active) }
+        automaticRefresh.setActivity(active: active, onBattery: onBattery)
+        if changed && active { startRuleTimer() }
+    }
     func cancelScan() { scanControl?.cancel(); workspace.localIndex.stop() }
     private func dismissPriorPages() { browser.showConnections = false; browser.showIndex = false; browser.showCleanup = false; browser.showSearch = false }
     private var navigationEntry: LibraryNavigationEntry {
@@ -576,7 +605,7 @@ final class LibraryModel: ObservableObject {
             }.value
             if token == transcriptToken { transcript = result }; extracting = false
             if result.isEmpty { status = "No supported text could be read from the selected local files." }
-            else if copy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(result, forType: .string); status = "Copied text from \(urls.count) file(s)." }
+            else if copy { workspace.clipboard.writeText(result); status = "Copied text from \(urls.count) file(s)." }
             if token != transcriptToken && selectText, let activeURL { copyText([activeURL], copy: false) }
         }
     }
@@ -626,10 +655,14 @@ final class LibraryModel: ObservableObject {
         catch { status = error.localizedDescription; cleanupReview = false }
     }
     private func startRuleTimer() {
+        guard loaded, activityActive, settings.autoInstallers || settings.autoScreenshots else {
+            timer?.invalidate(); timer = nil; return
+        }
+        guard timer == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in Task { @MainActor [weak self] in self?.runRules() } }
     }
     func runRules() {
-        guard !workspace.jobs.busy else { return }
+        guard activityActive, !workspace.jobs.busy else { return }
         if settings.autoInstallers {
             let roots = settings.roots
             let values = candidates("Old Installers").filter { item in roots.contains { SearchScope.contains(itemPath: item.path, scopePath: $0) } }.prefix(20).filter { (try? $0.revalidate()) != nil }
@@ -691,7 +724,7 @@ final class LibraryModel: ObservableObject {
             browser.run(OperationRequest(.move, sources: [url], destination: original.deletingLastPathComponent(), name: original.lastPathComponent))
         } catch { status = error.localizedDescription }
     }
-    func shutdown() { scanControl?.cancel(); watcher = nil; timer?.invalidate(); refreshTask?.cancel(); searchTask?.cancel(); workspace.localIndex.shutdown(); remote?.cancel(); remote?.clearPreview(synchronous: true); player.pause(); if let playerObserver { player.removeTimeObserver(playerObserver); self.playerObserver = nil }; if let endObserver { NotificationCenter.default.removeObserver(endObserver); self.endObserver = nil } }
+    func shutdown() { activityActive = false; automaticRefresh.cancel(); scanControl?.cancel(); watcher = nil; timer?.invalidate(); refreshTask?.cancel(); searchTask?.cancel(); workspace.localIndex.shutdown(); remote?.cancel(); remote?.clearPreview(synchronous: true); player.pause(); if let playerObserver { player.removeTimeObserver(playerObserver); self.playerObserver = nil }; if let endObserver { NotificationCenter.default.removeObserver(endObserver); self.endObserver = nil } }
 }
 
 @MainActor final class PlaybackClock: ObservableObject {
