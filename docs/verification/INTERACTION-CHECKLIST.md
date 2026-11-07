@@ -88,6 +88,15 @@ Start the disposable server in a terminal with `zsh Scripts/sftp-fixture.sh`. It
 - [ ] Settings → Library → Free Up Space exclusions: Remove makes files eligible again; ordinary Library pages always retain the files.
 - [ ] Changing exclusions clears stale cleanup picks/reviews, including duplicate/similar groups that become singletons.
 
+## 7. Background and power policy
+
+- [ ] Hide, minimize or switch away from MacEx while a library/index scan runs: it stops after its current bounded request.
+- [ ] Create a disposable file while hidden, then return: one catch-up scan finds it; repeated visibility notifications do not repeat the scan.
+- [ ] Stop or Clear text recognition, then hide/show: indexing remains stopped until explicitly started or enabled again.
+- [ ] Switch physical AC/battery power with a pending filesystem event: library/index delays change between 3 and 30 seconds; folder events are also deferred on battery.
+- [ ] Measure idle CPU and wakeups while hidden after cancellation settles; confirm no automatic watcher/timer activity.
+- [ ] An explicit copy/SFTP transfer and chosen media playback can continue while the app is inactive.
+
 ## Cleanup
 
 - [ ] Remove the disposable folder from the library and delete it.

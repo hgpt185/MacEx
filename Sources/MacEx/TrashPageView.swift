@@ -135,7 +135,7 @@ private struct TrashRow: View {
     private var exists: Bool { facts?.exists != false }
     var body: some View {
         HStack(spacing: 12) {
-            Image(nsImage: exists ? NSWorkspace.shared.icon(forFile: item.trashPath) : NSWorkspace.shared.icon(for: .data))
+            Image(nsImage: exists ? SystemFileServices.icon(forFile: item.trashPath) : SystemFileServices.icon(for: .data))
                 .resizable().frame(width: 30, height: 30).opacity(exists ? 1 : 0.4)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)

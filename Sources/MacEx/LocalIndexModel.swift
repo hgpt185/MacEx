@@ -36,8 +36,19 @@ final class LocalIndexModel: ObservableObject {
     private var debounce: Task<Void, Never>?
     private var periodic: Timer?
     private var pending = false
+    private let refreshSleep: @Sendable (Duration) async throws -> Void
+    private var activityActive = true
+    private var indexing = false
+    private var resumeIndexing = false
+    private var monitoringWanted = false
+    private var manuallyPaused = false
+    private lazy var automaticRefresh = AutomaticRefresh(sleep: refreshSleep) { [weak self] in
+        guard let self, self.monitoringWanted || self.resumeIndexing else { return }
+        if self.running { self.pending = true } else { self.start(automatically: true) }
+    }
     var busy: Bool { running }
 
+    init(sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) { refreshSleep = sleep }
     func configure(directory: URL) {
         self.directory = directory
         store = LocalIndex(directory: directory)
@@ -92,12 +103,18 @@ final class LocalIndexModel: ObservableObject {
             running = false
         }
     }
-    func start() {
-        guard !running, !roots.isEmpty, let store else { return }
+    func start(automatically: Bool = false) {
+        if automatically && manuallyPaused { return }
+        if !automatically { manuallyPaused = false }
+        guard !roots.isEmpty, let store else { return }
+        guard activityActive else { resumeIndexing = true; monitoringWanted = keepUpdated; return }
+        guard !running else { return }
+        resumeIndexing = false; pending = false
         do { try saveSettings() } catch { self.error = error.localizedDescription; return }
         let options = options; let roots = roots
         let control = JobControl(); self.control = control
-        running = true; error = nil; status = "Indexing selected folders…"
+        running = true; indexing = true; error = nil; status = "Indexing selected folders…"
+        monitoringWanted = keepUpdated
         if keepUpdated { beginMonitoring() }
         task = Task(priority: .utility) { [self] in
             var complete = true
@@ -105,31 +122,51 @@ final class LocalIndexModel: ObservableObject {
                 for root in roots {
                     let result = try await store.reconcile(root: URL(fileURLWithPath: root), options: options, control: control) { [weak self] progress in
                         Task { @MainActor [weak self] in
-                            guard let self, self.running else { return }
+                            guard let self, self.activityActive, self.running else { return }
                             self.status = "\(root): \(progress.examined) examined, \(progress.updated) updated, \(progress.unchanged) checkpoints reused."
                         }
                     }
                     status = "\(root): \(result.message)"
                     if !result.complete { complete = false; break }
                 }
-            } catch { complete = false; self.error = error.localizedDescription }
-            running = false; self.control = nil
-            if pending && monitoring { pending = false; scheduleReconciliation() }
-            if !complete { stopMonitoring() }
-            if pending && monitoring { pending = false; scheduleReconciliation() }
+            } catch {
+                complete = false
+                if activityActive || !control.isCancelled { self.error = error.localizedDescription }
+            }
+            running = false; indexing = false; self.control = nil
+            guard activityActive else { return }
+            if resumeIndexing { resumeIndexing = false; start(automatically: true); return }
+            if !complete { stopMonitoring(); return }
+            if pending && monitoringWanted { pending = false; scheduleReconciliation() }
         }
     }
+    func setActivity(active: Bool, onBattery: Bool) {
+        let changed = activityActive != active
+        activityActive = active
+        let catchUp = monitoringWanted || indexing || resumeIndexing
+        if changed && !active {
+            if indexing { resumeIndexing = true; control?.cancel() }
+            suspendMonitoring()
+        } else if changed && active && monitoringWanted { beginMonitoring() }
+        automaticRefresh.setActivity(active: active, onBattery: onBattery, catchUp: catchUp)
+        if changed && active && resumeIndexing && !running { resumeIndexing = false; start(automatically: true) }
+    }
+    func allowAutomaticIndexing() { manuallyPaused = false }
     func stop() {
-        control?.cancel(); stopMonitoring()
+        manuallyPaused = true; control?.cancel(); stopMonitoring()
         status = "Stopping after the current bounded request. Checkpoints are retained. Resume reconciles selected folders."
     }
-    func shutdown() { control?.cancel(); stopMonitoring() }
-    private func stopMonitoring() {
+    func shutdown() { activityActive = false; control?.cancel(); stopMonitoring() }
+    private func suspendMonitoring() {
         watcher = nil; debounce?.cancel(); debounce = nil; periodic?.invalidate(); periodic = nil
-        monitoring = false; pending = false
+        monitoring = false
+    }
+    private func stopMonitoring() {
+        suspendMonitoring(); automaticRefresh.cancel()
+        monitoringWanted = false; resumeIndexing = false; pending = false
     }
     private func beginMonitoring() {
-        guard watcher == nil else { return }
+        guard activityActive, monitoringWanted, watcher == nil else { return }
         do {
             watcher = try IndexEvents(roots: roots) { [weak self] in Task { @MainActor [weak self] in self?.scheduleReconciliation() } }
             monitoring = true
@@ -139,17 +176,13 @@ final class LocalIndexModel: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
     private func scheduleReconciliation() {
-        guard monitoring else { return }
+        guard monitoringWanted else { return }
         if running { pending = true; return }
-        debounce?.cancel()
-        debounce = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(3)) } catch { return }
-            guard let self, self.monitoring else { return }; self.start()
-        }
+        automaticRefresh.request()
     }
     func clear() {
         guard !running, let store else { return }
-        stopMonitoring(); running = true; documents = []; resultSummary = ""
+        manuallyPaused = true; stopMonitoring(); running = true; documents = []; resultSummary = ""
         task = Task {
             do { try await store.clear(); status = "Index cleared. Selected roots remain saved; nothing restarts until Start." }
             catch { self.error = error.localizedDescription }

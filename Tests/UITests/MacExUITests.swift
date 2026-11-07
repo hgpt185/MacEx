@@ -132,6 +132,17 @@ final class MacExUITests: XCTestCase {
             XCTAssertEqual(app.windows.count, 1)
         }
     }
+    @MainActor func testHiddenWindowCatchesUpOnReturn() throws {
+        try withFixture { app, root in
+            app.typeKey("2", modifierFlags: .command)
+            XCTAssertTrue(app.tables["file-list"].staticTexts["Welcome.txt"].waitForExistence(timeout: 5))
+            app.typeKey("h", modifierFlags: .command)
+            try Data("Arrived while the window was hidden".utf8).write(to: root.appendingPathComponent("Arrived.txt"))
+            app.activate()
+            XCTAssertTrue(app.tables["file-list"].staticTexts["Arrived.txt"].waitForExistence(timeout: 5))
+            XCTAssertEqual(app.windows.count, 1)
+        }
+    }
     @MainActor func testSidebarRowsAlignAndActivateAcrossBlankSpace() throws {
         try withFixture { app, _ in
             app.typeKey("n", modifierFlags: .command)

@@ -122,7 +122,7 @@ struct LibrarySettingsView: View {
                     HeaderButton(title: "Add Folder…", symbol: "plus") { model.addFolder() }.disabled(model.scanning)
                     HeaderButton(title: model.scanning ? "Refreshing…" : "Refresh Library", symbol: "arrow.clockwise") { model.refresh() }.disabled(model.scanning)
                     Spacer()
-                }.padding(.horizontal, 10).padding(.vertical, 8)
+                }.padding(.horizontal, 10).padding(.vertical, 8).background(Theme.surface)
             }
             SettingsGroup {
                 SettingsRow("Downloads folder", detail: model.settings.downloadsPath.replacingOccurrences(of: NSHomeDirectory(), with: "~")) {
@@ -157,7 +157,7 @@ struct LibrarySettingsView: View {
         SettingsGroup(footer: "Recognition runs on this Mac with Apple Vision. Online-only files are never downloaded. Recognized text can miss words.") {
             SettingsRow("Find words inside images and PDFs", detail: "Search matches text in screenshots, scans and photos.") {
                 Toggle("", isOn: $model.settings.recognizeText).toggleStyle(.switch).labelsHidden()
-                    .onChange(of: model.settings.recognizeText) { _, enabled in if enabled { model.refresh() } else { model.workspace.localIndex.stop() } }
+                    .onChange(of: model.settings.recognizeText) { _, enabled in model.setTextRecognition(enabled) }
             }
             SettingsRow("Languages, exclusions and data", detail: "Pause recognition, choose languages, or clear recognized text.") {
                 HeaderButton(title: "Manage…") { model.browser.showIndex = true }
@@ -191,7 +191,7 @@ struct LibrarySettingsView: View {
                 HStack { HeaderButton(title: "Add Folder…", symbol: "plus") { model.addRuleFolder() }.disabled(model.scanning); Spacer() }
                     .padding(.horizontal, 10).padding(.vertical, 8)
             }
-            SettingsGroup(title: "Rules", footer: "Enabled rules run every 30 minutes while MacEx is open. Files go to Trash, never deleted, and online-only files are never downloaded.") {
+            SettingsGroup(title: "Rules", footer: "Enabled rules run every 30 minutes while MacEx is in the foreground. Files go to Trash, never deleted, and online-only files are never downloaded.") {
                 SettingsRow("Trash old installers", detail: ".dmg and .pkg files older than \(model.settings.ruleDays) days.") {
                     Toggle("", isOn: rule(\.autoInstallers, title: "Turn on installer cleanup?", message: "Old .dmg/.pkg installers inside these folders will move to Trash after \(model.settings.ruleDays) days:\n\(model.settings.roots.joined(separator: "\n"))\nNothing is permanently deleted."))
                         .toggleStyle(.switch).labelsHidden().disabled(model.settings.roots.isEmpty && !model.settings.autoInstallers)
@@ -240,21 +240,11 @@ struct SettingsGroup<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let title { Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).padding(.leading, 4) }
-            VStack(spacing: 0) {
-                _VariadicView.Tree(SeparatedLayout()) { content }
-            }
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surface))
+            VStack(spacing: 1) { content }
+            .background(Theme.hairline)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.hairline, lineWidth: 1))
             if let footer { Text(footer).font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 4).fixedSize(horizontal: false, vertical: true) }
-        }
-    }
-}
-
-private struct SeparatedLayout: _VariadicView_MultiViewRoot {
-    @ViewBuilder func body(children: _VariadicView.Children) -> some View {
-        ForEach(Array(children.enumerated()), id: \.offset) { index, child in
-            if index > 0 { Rectangle().fill(Theme.hairline).frame(height: 1).padding(.leading, 14) }
-            child
         }
     }
 }
@@ -278,7 +268,7 @@ struct SettingsRow<Control: View>: View {
             }
             Spacer(minLength: 12)
             control
-        }.padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 46)
+        }.padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 46).background(Theme.surface)
     }
 }
 private struct UpdateSettingsView: View {

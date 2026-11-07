@@ -33,7 +33,7 @@ final class Thumbnails {
         if entry.identity.isSymbolicLink { return NSImage(systemSymbolName: "link", accessibilityDescription: "Symbolic link")! }
         let ext = entry.url.pathExtension.lowercased()
         if let image = iconCache[ext] { return image }
-        let image = NSWorkspace.shared.icon(for: UTType(filenameExtension: ext) ?? .data)
+        let image = SystemFileServices.icon(for: UTType(filenameExtension: ext) ?? .data)
         if iconCache.count < 128 { iconCache[ext] = image }
         return image
     }
