@@ -71,6 +71,67 @@ final class MacExUITests: XCTestCase {
             XCTAssertEqual(app.windows.count, 1)
         }
     }
+    @MainActor func testInlineRenameFieldRemainsReachableInNativeAccessibilityTree() throws {
+        try withFixture { app, _ in
+            for mode in ["2", "1"] {
+                app.typeKey(mode, modifierFlags: .command)
+                let file = mode == "2" ? app.tables["file-list"].staticTexts["Welcome.txt"] : app.cells["file-Welcome.txt"]
+                XCTAssertTrue(file.waitForExistence(timeout: 5), app.debugDescription)
+                file.click(); app.typeKey(.return, modifierFlags: [])
+                let editor = app.textFields["inline-rename"]
+                XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
+                XCTAssertEqual(editor.value as? String, "Welcome.txt")
+                XCTAssertTrue(app.staticTexts["Destination"].exists || app.cells["file-Destination"].exists, "Other file rows must stay reachable while editing")
+                editor.typeKey(.escape, modifierFlags: [])
+                XCTAssertTrue(file.waitForExistence(timeout: 5))
+                XCTAssertFalse(editor.exists)
+            }
+        }
+    }
+    @MainActor func testEditablePathAndShortcutHelpStayInOneWindow() throws {
+        try withFixture { app, root in
+            app.typeKey("l", modifierFlags: .command)
+            let path = app.textFields["folder-path-input"]
+            XCTAssertTrue(path.waitForExistence(timeout: 5))
+            path.typeKey("a", modifierFlags: .command)
+            path.typeText(root.appendingPathComponent("Dest").path)
+            path.typeKey(.tab, modifierFlags: [])
+            let completed = NSPredicate(format: "value ENDSWITH %@", "/Destination/")
+            expectation(for: completed, evaluatedWith: path)
+            waitForExpectations(timeout: 5)
+            path.typeKey(.return, modifierFlags: [])
+            let heading = app.staticTexts["folder-title"]
+            expectation(for: NSPredicate(format: "value == %@", "Destination"), evaluatedWith: heading)
+            waitForExpectations(timeout: 5)
+            app.typeKey("/", modifierFlags: .command)
+            XCTAssertTrue(app.staticTexts["Keyboard Shortcuts"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "Edit Path")).firstMatch.exists)
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertFalse(app.staticTexts["Keyboard Shortcuts"].exists)
+            XCTAssertEqual(app.windows.count, 1)
+        }
+    }
+    @MainActor func testQuickLookArrowsDoNotChangeUnderlyingSelection() throws {
+        try withFixture { app, root in
+            try Data("Second preview fixture".utf8).write(to: root.appendingPathComponent("Zulu.txt"))
+            app.typeKey("r", modifierFlags: .command)
+            app.typeKey("2", modifierFlags: .command)
+            let table = app.tables["file-list"]
+            let welcome = table.staticTexts["Welcome.txt"]
+            XCTAssertTrue(welcome.waitForExistence(timeout: 5)); welcome.click()
+            app.typeKey(.space, modifierFlags: [])
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "Disposable inline preview fixture")).firstMatch.waitForExistence(timeout: 5))
+            app.typeKey(.rightArrow, modifierFlags: [])
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "Second preview fixture")).firstMatch.waitForExistence(timeout: 5))
+            app.buttons["Fill window with preview"].click()
+            XCTAssertTrue(app.buttons["Reduce preview"].exists)
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(welcome.exists)
+            XCTAssertEqual(table.descendants(matching: .tableRow).matching(NSPredicate(format: "selected == true")).count, 1)
+            XCTAssertTrue(table.descendants(matching: .tableRow).matching(NSPredicate(format: "selected == true")).firstMatch.staticTexts["Welcome.txt"].exists)
+            XCTAssertEqual(app.windows.count, 1)
+        }
+    }
     @MainActor func testSidebarRowsAlignAndActivateAcrossBlankSpace() throws {
         try withFixture { app, _ in
             app.typeKey("n", modifierFlags: .command)

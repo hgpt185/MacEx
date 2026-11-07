@@ -184,8 +184,9 @@ struct FreeUpSpaceView: View {
                     toggle([item.path], on: !selection.contains(item.path))
                 }.contextMenu {
                     Button("Open") { FileOpener.open(item.url) }
-                    Button("Quick Look") { model.preview(item.url) }
+                    Button("Quick Look") { model.preview(item.url, order: items.map(\.url)) }
                     Button("Show in Enclosing Folder") { model.openFolder(item.url.deletingLastPathComponent()) }
+                    CleanupIgnoreMenu(model: model, url: item.url)
                 }
             }
             if items.count > 200 {
@@ -198,7 +199,7 @@ struct FreeUpSpaceView: View {
     // MARK: Duplicates and similar photos
 
     private var duplicatesCard: some View {
-        let groups = cleanup.catalogBacked ? (cleanup.scan?.duplicates ?? []) : []
+        let groups = model.cleanupDuplicateGroups(cleanup.catalogBacked ? (cleanup.scan?.duplicates ?? []) : [])
         let extras = Set(groups.flatMap { group in Self.extras(group) })
         let picked = extras.intersection(selection).count
         let state: CheckState = picked == 0 ? .off : picked == extras.count ? .on : .mixed
@@ -226,6 +227,11 @@ struct FreeUpSpaceView: View {
                                 let path = SearchScope.canonicalPath(file.url.path)
                                 DuplicateRow(url: file.url, keep: path == keep, checked: selection.contains(path)) {
                                     toggle([path], on: !selection.contains(path))
+                                }.contextMenu {
+                                    Button("Open") { FileOpener.open(file.url) }
+                                    Button("Quick Look") { model.preview(file.url, order: group.files.map(\.url)) }
+                                    Button("Show in Enclosing Folder") { model.openFolder(file.url.deletingLastPathComponent()) }
+                                    CleanupIgnoreMenu(model: model, url: file.url)
                                 }
                             }
                         }
@@ -235,10 +241,10 @@ struct FreeUpSpaceView: View {
         }
     }
     /// The newest copy of each group is the default keeper; everything else is an extra.
-    private static func keeper(_ group: DuplicateGroup) -> String? {
+    private static func keeper(_ group: CleanupDuplicateGroup) -> String? {
         group.files.max { $0.identity.modified < $1.identity.modified }.map { SearchScope.canonicalPath($0.url.path) }
     }
-    private static func extras(_ group: DuplicateGroup) -> [String] {
+    private static func extras(_ group: CleanupDuplicateGroup) -> [String] {
         let keep = keeper(group)
         return group.files.map { SearchScope.canonicalPath($0.url.path) }.filter { $0 != keep }
     }
@@ -271,6 +277,22 @@ struct FreeUpSpaceView: View {
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Theme.hairline, lineWidth: 1))
         .shadow(color: .black.opacity(0.25), radius: 18, y: 6)
         .padding(.horizontal, 22).padding(.bottom, 14)
+    }
+}
+
+/// Shared by ordinary suggestions, duplicate members and the Similar Photos review.
+struct CleanupIgnoreMenu: View {
+    @ObservedObject var model: LibraryModel
+    let url: URL
+    var body: some View {
+        Divider()
+        Menu("Ignore in Free Up Space") {
+            Button("This File") { model.ignoreForCleanup(url, kind: .file) }
+            if !url.pathExtension.isEmpty {
+                Button("All .\(url.pathExtension.lowercased()) Files") { model.ignoreForCleanup(url, kind: .fileExtension) }
+            }
+            Button("Enclosing Folder") { model.ignoreForCleanup(url, kind: .folder) }
+        }
     }
 }
 

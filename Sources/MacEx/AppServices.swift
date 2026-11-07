@@ -98,7 +98,7 @@ final class SharedJobs: ObservableObject {
                 case let .conflict(url): await owner.resolveConflict(url, control: control)
                 case let .finished(result):
                     summary = result; self.control = nil; busy = false; progress = nil
-                    NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
+                    NotificationCenter.default.post(name: .macexFilesChanged, object: self)
                     if !result.errors.isEmpty { owner.errorMessage = result.errors.joined(separator: "\n") }
                     if undoable { undo.record(request.action, result, owner: owner) }
                     completion?(result)
@@ -114,7 +114,7 @@ final class SharedJobs: ObservableObject {
                 switch event {
                 case let .progress(value): progress = value
                 case let .finished(value):
-                    summary = value; progress = nil; busy = false; self.control = nil; NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
+                    summary = value; progress = nil; busy = false; self.control = nil; NotificationCenter.default.post(name: .macexFilesChanged, object: self)
                     undo.record(.trash, value, owner: owner)
                 case .conflict: break
                 }
@@ -131,7 +131,7 @@ final class SharedJobs: ObservableObject {
                 case let .progress(value): progress = value
                 case let .finished(result):
                     summary = result; self.control = nil; busy = false; progress = nil
-                    NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
+                    NotificationCenter.default.post(name: .macexFilesChanged, object: self)
                     undo.record(.trash, result, owner: owner)
                     completion(result)
                 case .conflict: break

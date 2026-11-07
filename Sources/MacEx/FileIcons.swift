@@ -45,9 +45,14 @@ struct FileIcons: NSViewRepresentable {
         var revision = -1
         var updating = false
         private var selectionObserver: AnyCancellable?
+        private var renameObserver: AnyCancellable?
         init(_ model: BrowserModel) { self.model = model }
         func observeSelection() {
             selectionObserver = model.selectionChanges.sink { [weak self] in self?.apply($0) }
+            renameObserver = model.renameChanges.sink { [weak self] url in
+                guard let collection = self?.collection as? BrowserCollection else { return }
+                if let url { collection.beginRename(url) } else { collection.endRename() }
+            }
         }
         func apply(_ wanted: Set<URL>) {
             guard let collection else { return }
@@ -105,6 +110,7 @@ struct FileIcons: NSViewRepresentable {
         (view as? FileIconView)?.hoverChanged = { [weak self] in self?.styleSelection() }
         let image = NSImageView(); image.translatesAutoresizingMaskIntoConstraints = false; image.imageScaling = .scaleProportionallyUpOrDown
         let label = NSTextField(wrappingLabelWithString: ""); label.translatesAutoresizingMaskIntoConstraints = false
+        (view as? FileIconView)?.renameField = label
         label.isSelectable = false; label.isEditable = false; label.alignment = .center; label.font = .systemFont(ofSize: 12); label.maximumNumberOfLines = 2; label.lineBreakMode = .byTruncatingMiddle
         view.addSubview(image); view.addSubview(label); imageView = image; textField = label
         NSLayoutConstraint.activate([
@@ -156,6 +162,7 @@ struct FileIcons: NSViewRepresentable {
 }
 
 @MainActor private final class FileIconView: NSView {
+    weak var renameField: NSTextField?
     var pressAction: (() -> Void)?
     var hoverChanged: (() -> Void)?
     private(set) var hovered = false
@@ -168,7 +175,11 @@ struct FileIcons: NSViewRepresentable {
     }
     /// The whole tile belongs to the collection view: labels and images never take the click, so selection,
     /// double-click, drag and context menus all go through one code path.
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let renameField, renameField.isEditable, let hit = super.hitTest(point),
+              hit === renameField || hit.isDescendant(of: renameField) else { return nil }
+        return hit
+    }
     override func mouseEntered(with event: NSEvent) { hovered = true; hoverChanged?() }
     override func mouseExited(with event: NSEvent) { hovered = false; hoverChanged?() }
     override func accessibilityPerformPress() -> Bool { pressAction?(); return pressAction != nil }
@@ -178,6 +189,22 @@ struct FileIcons: NSViewRepresentable {
     weak var model: BrowserModel?
     private var menuActions: FileMenuActions?
     private var receivedFocus = false
+    private let renameEditor = InlineRenameEditor()
+    private var slowRenameClick = SlowRenameClick()
+    func beginRename(_ url: URL) {
+        guard let model, let index = model.entries.firstIndex(where: { $0.url == url }) else { return }
+        let path = IndexPath(item: index, section: 0)
+        scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge)
+        layoutSubtreeIfNeeded()
+        guard let label = item(at: path)?.textField else { return }
+        renameEditor.begin(model.entries[index], label: label, in: self, model: model, accessibilityContainer: label.superview)
+    }
+    func endRename() { renameEditor.end(); slowRenameClick.reset(); renameOnMouseUp = nil }
+    private func nameURL(at point: NSPoint) -> URL? {
+        guard let path = pathAt(point), let model, model.entries.indices.contains(path.item),
+              let label = item(at: path)?.textField, label.convert(label.bounds, to: self).contains(point) else { return nil }
+        return model.entries[path.item].url
+    }
     override var acceptsFirstResponder: Bool { true }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -191,6 +218,7 @@ struct FileIcons: NSViewRepresentable {
     private var pressPoint: NSPoint?
     private var pressedPath: IndexPath?
     private var collapseOnMouseUp: IndexPath?
+    private var renameOnMouseUp: URL?
     private var anchor: IndexPath?
 
     /// Item under a point, from layout frames. (`indexPathForItem(at:)` hit-tests item views, which are deliberately
@@ -208,11 +236,16 @@ struct FileIcons: NSViewRepresentable {
         let point = convert(event.locationInWindow, from: nil)
         let path = pathAt(point)
         let flags = event.modifierFlags.intersection([.command, .shift, .control])
-        collapseOnMouseUp = nil
+        if model?.renameURL != nil { model?.cancelRename() }
+        collapseOnMouseUp = nil; renameOnMouseUp = nil
         if flags.contains(.control) { super.mouseDown(with: event); return } // ⌃-click shows the context menu.
         if event.clickCount >= 2, flags.isEmpty, let path, let model, model.entries.indices.contains(path.item) {
+            slowRenameClick.reset()
             commit([path]); model.open(model.entries[path.item]); return
         }
+        if flags.isEmpty, event.clickCount == 1, let url = nameURL(at: point), model?.selection == [url],
+           slowRenameClick.shouldRename(url, at: event.timestamp) { renameOnMouseUp = url }
+        if !flags.isEmpty || nameURL(at: point) == nil { slowRenameClick.reset() }
         guard let path else {
             // Empty space: clear (unless ⌘/⇧) and get ready for a rubber-band selection.
             if flags.isEmpty { commit([]) }
@@ -236,6 +269,7 @@ struct FileIcons: NSViewRepresentable {
         pressPoint = point; pressedPath = path
     }
     override func mouseDragged(with event: NSEvent) {
+        slowRenameClick.reset()
         if let start = marqueeStart {
             autoscroll(with: event)
             updateMarquee(from: start, to: convert(event.locationInWindow, from: nil))
@@ -244,13 +278,21 @@ struct FileIcons: NSViewRepresentable {
         guard let start = pressPoint, pressedPath != nil, model?.busy != true else { return }
         let point = convert(event.locationInWindow, from: nil)
         guard hypot(point.x - start.x, point.y - start.y) >= 4 else { return }
-        pressPoint = nil; collapseOnMouseUp = nil
+        pressPoint = nil; collapseOnMouseUp = nil; renameOnMouseUp = nil
         beginFileDrag(event)
     }
     override func mouseUp(with event: NSEvent) {
         if marqueeStart != nil { endMarquee() }
         if let path = collapseOnMouseUp { commit([path]) }
-        collapseOnMouseUp = nil; pressPoint = nil; pressedPath = nil
+        if let url = renameOnMouseUp, model?.selection == [url], nameURL(at: convert(event.locationInWindow, from: nil)) == url {
+            model?.rename()
+        }
+        if pressPoint != nil, model?.renameURL == nil, event.clickCount == 1,
+           event.modifierFlags.intersection([.command, .shift, .control]).isEmpty,
+           let url = nameURL(at: convert(event.locationInWindow, from: nil)), model?.selection == [url] {
+            slowRenameClick.record(url, at: event.timestamp)
+        }
+        collapseOnMouseUp = nil; renameOnMouseUp = nil; pressPoint = nil; pressedPath = nil
     }
     // Rubber-band selection: dragging from empty space selects every item the rectangle touches.
     // ⌘ toggles items against the existing selection, ⇧ adds to it.
@@ -302,6 +344,7 @@ struct FileIcons: NSViewRepresentable {
     override func draggingExited(_ sender: (any NSDraggingInfo)?) { model?.dropHint = nil; super.draggingExited(sender) }
     override func concludeDragOperation(_ sender: (any NSDraggingInfo)?) { model?.dropHint = nil; super.concludeDragOperation(sender) }
     override func menu(for event: NSEvent) -> NSMenu? {
+        model?.cancelRename()
         if let path = pathAt(convert(event.locationInWindow, from: nil)) {
             if !selectionIndexPaths.contains(path) { selectionIndexPaths = [path] }
         } else { selectionIndexPaths = [] }

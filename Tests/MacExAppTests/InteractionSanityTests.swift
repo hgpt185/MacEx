@@ -63,10 +63,203 @@ import MacExCore
         return index
     }
     var selectedNames: Set<String> { Set(browser.selection.map(\.lastPathComponent)) }
+    func fileView() throws -> NSView {
+        if browser.viewMode == .list { return try #require(find(BrowserTable.self)) }
+        return try #require(find(BrowserCollection.self))
+    }
+    func renameEditor(in view: NSView) -> NSTextField? {
+        if let field = view as? NSTextField, field.isEditable { return field }
+        return view.subviews.lazy.compactMap { self.renameEditor(in: $0) }.first
+    }
+    func inlineError(in view: NSView) -> Bool {
+        if let field = view as? NSTextField, field.textColor == .systemRed, !field.stringValue.isEmpty { return true }
+        return view.subviews.contains { inlineError(in: $0) }
+    }
+    func key(_ code: UInt16, in view: NSView) {
+        view.keyDown(with: NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                          windowNumber: window.windowNumber, context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: code)!)
+    }
+    @discardableResult func command(_ selector: Selector, field: NSTextField) throws -> Bool {
+        let editor = try #require(field.currentEditor() as? NSTextView)
+        return field.delegate?.control?(field, textView: editor, doCommandBy: selector) ?? false
+    }
 }
 
 /// Serialized: the tests share the global FileOpener hook and real windows.
 @Suite(.serialized) @MainActor struct InteractionSanityTests {
+    @Test func inlineRenameIgnoresChangesFromAnotherWorkspace() async throws {
+        let h = try await Harness(viewMode: .list); defer { h.close() }
+        let files = try h.fileView()
+        h.browser.selection = [h.browser.entries[h.index("alpha.txt")].url]
+        h.key(36, in: files)
+        let field = try #require(h.renameEditor(in: files))
+        let other = AppWorkspace()
+        NotificationCenter.default.post(name: .macexFilesChanged, object: other.jobs)
+        let retained = h.renameEditor(in: files) === field
+        #expect(retained)
+        NotificationCenter.default.post(name: .macexFilesChanged, object: h.workspace.jobs)
+        #expect(h.renameEditor(in: files) == nil)
+    }
+
+    // Catches replacing in-place editing with a modal prompt, selecting the extension, or losing Escape.
+    @Test func inlineRenameReturnSelectsBasenameAndEscapeCancelsInBothViews() async throws {
+        for mode in [BrowserViewMode.list, .icons] {
+            let h = try await Harness(viewMode: mode); defer { h.close() }
+            let files = try h.fileView()
+            h.browser.selection = Set(h.browser.entries.prefix(2).map(\.url)); h.key(36, in: files)
+            #expect(h.renameEditor(in: files) == nil)
+            h.browser.selection = [h.browser.entries[h.index("alpha.txt")].url]
+            let nativeName: NSTextField?
+            if let table = files as? BrowserTable {
+                nativeName = (table.view(atColumn: table.column(withIdentifier: NSUserInterfaceItemIdentifier("name")), row: h.index("alpha.txt"), makeIfNecessary: true) as? NSTableCellView)?.textField
+            } else {
+                nativeName = (files as? BrowserCollection)?.item(at: IndexPath(item: h.index("alpha.txt"), section: 0))?.textField
+            }
+            h.key(36, in: files)
+            try await h.settle(100)
+            let field = try #require(h.renameEditor(in: files), "Return must edit inside the file view")
+            #expect(field === nativeName, "Rename must edit the native cell field so AppKit exposes it in the real accessibility tree")
+            #expect(field.stringValue == "alpha.txt")
+            #expect((field.currentEditor() as? NSTextView)?.selectedRange() == NSRange(location: 0, length: 5))
+            field.stringValue = "discarded.txt"
+            #expect(try h.command(#selector(NSResponder.cancelOperation(_:)), field: field))
+            #expect(h.renameEditor(in: files) == nil)
+            #expect(nativeName?.isEditable == false && nativeName?.isHidden == false && nativeName?.stringValue == "alpha.txt")
+            #expect(FileManager.default.fileExists(atPath: h.browser.location.appendingPathComponent("alpha.txt").path))
+            #expect(!h.workspace.jobs.busy && !h.workspace.jobs.undo.manager.canUndo)
+        }
+    }
+
+    // Catches dispatching invalid/colliding names, bypassing Undo, or committing a stale editor.
+    @Test func inlineRenameValidatesCommitsRealJobAndCancelsWhenSelectionOrLocationChanges() async throws {
+        for mode in [BrowserViewMode.list, .icons] {
+            let h = try await Harness(viewMode: mode); defer { h.close() }
+            let files = try h.fileView()
+            let original = h.browser.entries[h.index("alpha.txt")].url
+            h.browser.selection = [original]; h.key(36, in: files)
+            try await h.settle(100)
+            let field = try #require(h.renameEditor(in: files))
+            for invalid in ["", "bad/name", "beta.txt"] {
+                field.stringValue = invalid
+                #expect(try h.command(#selector(NSResponder.insertNewline(_:)), field: field))
+                #expect(h.renameEditor(in: files) === field)
+                #expect(!h.workspace.jobs.busy && !h.workspace.jobs.undo.manager.canUndo)
+                #expect(h.inlineError(in: files))
+                #expect(field.accessibilityHelp()?.isEmpty == false)
+            }
+            field.stringValue = "renamed.txt"
+            #expect(try h.command(#selector(NSResponder.insertNewline(_:)), field: field))
+            let renamed = original.deletingLastPathComponent().appendingPathComponent("renamed.txt")
+            for _ in 0..<300 {
+                if FileManager.default.fileExists(atPath: renamed.path) && !h.workspace.jobs.busy { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(FileManager.default.fileExists(atPath: renamed.path))
+            #expect(!FileManager.default.fileExists(atPath: original.path))
+            #expect(h.workspace.jobs.undo.manager.undoMenuItemTitle == "Undo Rename")
+            h.workspace.jobs.undo.manager.undo()
+            for _ in 0..<300 {
+                if FileManager.default.fileExists(atPath: original.path) && !h.workspace.jobs.busy { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(FileManager.default.fileExists(atPath: original.path))
+            try await h.settle(300)
+            h.browser.selection = [original]; h.key(36, in: files); try await h.settle(100)
+            #expect(h.renameEditor(in: files) != nil)
+            h.browser.selection = [h.browser.entries[h.index("beta.txt")].url]
+            #expect(h.renameEditor(in: files) == nil)
+            h.key(36, in: files); try await h.settle(100)
+            #expect(h.renameEditor(in: files) != nil)
+            h.browser.navigate(h.browser.location.appendingPathComponent("Inner Folder"))
+            #expect(h.renameEditor(in: files) == nil)
+        }
+    }
+
+    @Test func inlineRenameSlowSecondNameClickEditsWithoutOpeningInBothViews() async throws {
+        for mode in [BrowserViewMode.list, .icons] {
+            let h = try await Harness(viewMode: mode); defer { h.close() }
+            let files = try h.fileView()
+            let index = h.index("alpha.txt")
+            h.browser.selection = [h.browser.entries[index].url]
+            // Establish the in-place editor first; the unimplemented list path must not enter AppKit's modal tracking loop.
+            h.key(36, in: files); try await h.settle(100)
+            let initialEditor = try #require(h.renameEditor(in: files))
+            _ = try h.command(#selector(NSResponder.cancelOperation(_:)), field: initialEditor)
+            let point: NSPoint
+            if let table = files as? BrowserTable {
+                let cell = try #require(table.view(atColumn: 0, row: index, makeIfNecessary: true) as? NSTableCellView)
+                let field = try #require(cell.textField)
+                point = field.convert(NSPoint(x: 15, y: field.bounds.midY), to: table)
+            } else {
+                let grid = try #require(files as? BrowserCollection)
+                let label = try #require(grid.item(at: IndexPath(item: index, section: 0))?.textField)
+                point = label.convert(NSPoint(x: label.bounds.midX, y: label.bounds.midY), to: grid)
+            }
+            func clickEvent(_ type: NSEvent.EventType, time: TimeInterval) -> NSEvent {
+                NSEvent.mouseEvent(with: type, location: files.convert(point, to: nil), modifierFlags: [], timestamp: time,
+                                   windowNumber: h.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            }
+            let now = ProcessInfo.processInfo.systemUptime
+            // Native NSTableView owns its first name-click tracking loop; deliver that completed click directly.
+            if files is BrowserCollection { files.mouseDown(with: clickEvent(.leftMouseDown, time: now)) }
+            files.mouseUp(with: clickEvent(.leftMouseUp, time: now + 0.05))
+            if files is BrowserCollection {
+                files.mouseDown(with: clickEvent(.leftMouseDown, time: now + NSEvent.doubleClickInterval + 0.3))
+                #expect(h.renameEditor(in: files) == nil, "The second press must remain available to start a drag")
+            }
+            files.mouseUp(with: clickEvent(.leftMouseUp, time: now + NSEvent.doubleClickInterval + 0.35))
+            try await h.settle(100)
+            #expect(h.renameEditor(in: files) != nil)
+            #expect(h.opened.isEmpty)
+        }
+    }
+
+    @Test func inlineRenamePreservesExistingCaseOnlyRenameSupport() async throws {
+        let h = try await Harness(viewMode: .list); defer { h.close() }
+        let files = try h.fileView(), original = h.browser.entries[h.index("alpha.txt")].url
+        h.browser.selection = [original]; h.key(36, in: files)
+        let field = try #require(h.renameEditor(in: files))
+        field.stringValue = "ALPHA.txt"
+        #expect(try h.command(#selector(NSResponder.insertNewline(_:)), field: field))
+        for _ in 0..<300 {
+            if !h.workspace.jobs.busy, h.workspace.jobs.undo.manager.canUndo { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let names = try FileManager.default.contentsOfDirectory(atPath: original.deletingLastPathComponent().path)
+        #expect(names.contains("ALPHA.txt") && !names.contains("alpha.txt"))
+        #expect(h.workspace.jobs.undo.manager.undoMenuItemTitle == "Undo Rename")
+    }
+
+    @Test func inlineRenameCancelsBeforeScrolledCellsAreReused() async throws {
+        for mode in [BrowserViewMode.list, .icons] {
+            let h = try await Harness(viewMode: mode); defer { h.close() }
+            for index in 0..<100 { try Data().write(to: h.browser.location.appendingPathComponent("fixture-\(index).txt")) }
+            h.browser.reload()
+            for _ in 0..<300 { if h.browser.entries.count == 106 && !h.browser.isLoading { break }; try await Task.sleep(for: .milliseconds(10)) }
+            try await h.settle(100)
+            let files = try h.fileView()
+            h.browser.selection = [h.browser.entries[h.index("alpha.txt")].url]; h.key(36, in: files)
+            #expect(h.renameEditor(in: files) != nil)
+            if let table = files as? BrowserTable { table.scrollRowToVisible(table.numberOfRows - 1) }
+            if let grid = files as? BrowserCollection { grid.scrollToItems(at: [IndexPath(item: h.browser.entries.count - 1, section: 0)], scrollPosition: .bottom) }
+            try await h.settle(100)
+            #expect(h.renameEditor(in: files) == nil)
+            #expect(h.browser.renameURL == nil)
+        }
+    }
+
+    @Test func inlineRenameRefreshCancelsBeforeUnchangedRowsReload() async throws {
+        for mode in [BrowserViewMode.list, .icons] {
+            let h = try await Harness(viewMode: mode); defer { h.close() }
+            let files = try h.fileView()
+            h.browser.selection = [h.browser.entries[h.index("alpha.txt")].url]; h.key(36, in: files)
+            #expect(h.renameEditor(in: files) != nil)
+            h.browser.reload()
+            #expect(h.renameEditor(in: files) == nil)
+            #expect(h.browser.renameURL == nil)
+        }
+    }
+
     @Test func iconViewClicksSelectToggleExtendAndOpen() async throws {
     let h = try await Harness(viewMode: .icons)
     defer { h.close() }

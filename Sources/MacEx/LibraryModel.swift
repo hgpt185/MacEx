@@ -22,8 +22,10 @@ struct LibrarySettings: Codable {
     var shortcutKey: UInt32 = 49
     var shortcutModifiers: UInt32 = 768 // Command + Shift, Carbon modifiers
     var saved: [LibrarySavedSearch] = []
+    var cleanupExclusions: [CleanupExclusion] = []
+    var onboardingComplete = false
     init() {}
-    enum CodingKeys: String, CodingKey { case roots, excludedDefaultRoots, downloadsPath, grid, playful, cardSize, menuBar, recognizeText, autoInstallers, autoScreenshots, ruleDays, shortcutKey, shortcutModifiers, saved }
+    enum CodingKeys: String, CodingKey { case roots, excludedDefaultRoots, downloadsPath, grid, playful, cardSize, menuBar, recognizeText, autoInstallers, autoScreenshots, ruleDays, shortcutKey, shortcutModifiers, saved, cleanupExclusions, onboardingComplete }
     init(from decoder: Decoder) throws {
         self.init(); let c = try decoder.container(keyedBy: CodingKeys.self)
         roots = try c.decodeIfPresent([String].self, forKey: .roots) ?? roots
@@ -40,6 +42,8 @@ struct LibrarySettings: Codable {
         shortcutKey = try c.decodeIfPresent(UInt32.self, forKey: .shortcutKey) ?? shortcutKey
         shortcutModifiers = try c.decodeIfPresent(UInt32.self, forKey: .shortcutModifiers) ?? shortcutModifiers
         saved = try c.decodeIfPresent([LibrarySavedSearch].self, forKey: .saved) ?? saved
+        cleanupExclusions = try c.decodeIfPresent([CleanupExclusion].self, forKey: .cleanupExclusions) ?? []
+        onboardingComplete = try c.decodeIfPresent(Bool.self, forKey: .onboardingComplete) ?? true
     }
 
 }
@@ -125,6 +129,10 @@ final class LibraryModel: ObservableObject {
     @Published var filters = LibraryQuery()
     @Published var selected = Set<String>()
     @Published var previewURL: URL?
+    var previewSource: [URL] = []
+    private weak var overlayReturnResponder: NSResponder?
+    @Published var shortcutsPresented = false
+    @Published var onboardingPresented = false
     @Published var inspector = false
     @Published var status = "Add folders to build your library. Your files stay on this Mac."
     @Published var scanning = false
@@ -166,7 +174,8 @@ final class LibraryModel: ObservableObject {
     private var transcriptToken = UUID()
     var onShow: (() -> Void)?
     var onSettingsChanged: (() -> Void)?
-    var activeItem: LibraryFile? { let path = previewURL?.path ?? selected.first; return snapshot.items.first { $0.path == path } }
+    var activeURL: URL? { previewURL ?? (route == .folder ? browser.selected.first?.url : selected.first.map { URL(fileURLWithPath: $0) }) }
+    var activeItem: LibraryFile? { let path = activeURL?.path; return snapshot.items.first { $0.path == path } }
     /// Filtered and sorted library for the current page. Views read this several times per render, so the result is
     /// memoized and recomputed only when the snapshot, route, filters, OCR matches or sort order change.
     var items: [LibraryFile] {
@@ -207,10 +216,13 @@ final class LibraryModel: ObservableObject {
         return Array(snapshot.items.filter { SearchScope.contains(itemPath: $0.path, scopePath: homeDownloads) }.sorted { ($0.added ?? .distantPast) > ($1.added ?? .distantPast) }.prefix(10))
     }
     var cleanupNames: [String] { ["Forgotten Downloads", "Old Installers", "Old Screenshots", "Big Old Videos", "Unused Apps", "Empty Files"] }
-    /// Memoized per snapshot, age rule and Downloads path; the Free Up Space page reads every category on each render.
-    private var candidateCache: (key: String, value: [String: [LibraryFile]]) = ("", [:])
+    /// Every eligibility setting participates in the cache key, including edits made while Settings is open.
+    private struct CandidateKey: Equatable {
+        var revision: Int; var days: Int; var downloads: String; var exclusions: [CleanupExclusion]
+    }
+    private var candidateCache: (key: CandidateKey?, value: [String: [LibraryFile]]) = (nil, [:])
     func candidates(_ name: String) -> [LibraryFile] {
-        let key = "\(snapshotRevision)|\(settings.ruleDays)|\(settings.downloadsPath)"
+        let key = CandidateKey(revision: snapshotRevision, days: settings.ruleDays, downloads: settings.downloadsPath, exclusions: settings.cleanupExclusions)
         if candidateCache.key != key { candidateCache = (key, [:]) }
         if let hit = candidateCache.value[name] { return hit }
         let value = computeCandidates(name).sorted { $0.bytes > $1.bytes }
@@ -221,7 +233,7 @@ final class LibraryModel: ObservableObject {
         let cutoff = Calendar.current.date(byAdding: .day, value: -settings.ruleDays, to: Date()) ?? .distantPast
         let downloads = settings.downloadsPath
         return snapshot.items.filter { item in
-            guard !item.onlineOnly else { return false }
+            guard !item.onlineOnly, !isCleanupExcluded(item.url) else { return false }
             switch name {
             case "Forgotten Downloads": return SearchScope.contains(itemPath: item.path, scopePath: downloads) && (item.added ?? item.created ?? item.modified) < cutoff
             case "Old Installers": return ["dmg", "pkg"].contains(item.url.pathExtension.lowercased()) && (item.added ?? item.created ?? item.modified) < cutoff
@@ -241,7 +253,9 @@ final class LibraryModel: ObservableObject {
         browser.quickLook = { [weak self] in if let url = self?.browser.selected.first?.url { self?.preview(url) } }
         browser.previewSelectionChanged = { [weak self] in
             // While the preview pane is open it follows the selection, so a single click is enough to look at a file.
-            guard let self, self.previewURL != nil || self.inspector, self.browser.selection.count == 1, let url = self.browser.selection.first,
+            guard let self else { return }
+            if self.inspector { self.clearInspectorText(); self.objectWillChange.send() }
+            guard self.previewURL != nil, self.browser.selection.count == 1, let url = self.browser.selection.first,
                   self.previewURL != url, self.browser.entries.first(where: { $0.url == url })?.isFolder != true else { return }
             self.preview(url)
         }
@@ -268,7 +282,7 @@ final class LibraryModel: ObservableObject {
             guard let self, let summary else { return }; let action = self.workspace.jobs.action
             Task { @MainActor [weak self] in self?.recordTrash(summary, action: action) }
         }.store(in: &subscriptions)
-        NotificationCenter.default.publisher(for: .macexFilesChanged).sink { [weak self] _ in self?.refresh() }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: .macexFilesChanged, object: workspace.jobs).sink { [weak self] _ in self?.refresh() }.store(in: &subscriptions)
         playerObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             Task { @MainActor [weak self] in guard let self else { return }; self.clock.update(position: time.seconds, length: self.player.currentItem?.duration.seconds ?? 0) }
         }
@@ -444,7 +458,7 @@ final class LibraryModel: ObservableObject {
         restoringNavigation = true
         defer { restoringNavigation = wasRestoring }
         dismissPriorPages(); searchTask?.cancel(); ocrToken = UUID(); searchingText = false; ocrMatches = []
-        route = destination; parsedSearchText = ""; searchText = ""; filters = LibraryQuery(); selected = []; previewURL = nil
+        route = destination; parsedSearchText = ""; searchText = ""; filters = LibraryQuery(); selected = []; previewURL = nil; previewSource = []
         cleanupReview = false; cleanupSelection = []; sourceFilter = ""
     }
     func show(_ destination: LibraryRoute) {
@@ -457,7 +471,7 @@ final class LibraryModel: ObservableObject {
         else if !restoringNavigation && phrase != parsedSearchText { forwardHistory = [] }
         parsedSearchText = phrase
         dismissPriorPages(); sourceFilter = ""
-        searchText = phrase; filters = LibraryQuery.parse(phrase); if filters.folder == "downloads" { filters.folder = settings.downloadsPath }; route = .search; previewURL = nil; selected = []
+        searchText = phrase; filters = LibraryQuery.parse(phrase); if filters.folder == "downloads" { filters.folder = settings.downloadsPath }; route = .search; previewURL = nil; previewSource = []; selected = []
         searchOCR()
     }
     func searchTextChanged(_ phrase: String) { if phrase != parsedSearchText { search(phrase, record: route != .search) } }
@@ -511,19 +525,48 @@ final class LibraryModel: ObservableObject {
         }
     }
     func openFolder(_ url: URL) { browser.navigate(url) }
-    func preview(_ url: URL) {
+    func preview(_ url: URL, order: [URL]? = nil) {
         guard !FileAvailability.isOnlineOnly(url) else { status = "Online-only file skipped. MacEx does not download it automatically."; return }
+        if previewURL == nil { focusOverlay(true) }
+        if let order { previewSource = order }
+        else if !previewSource.contains(url) { previewSource = [] }
         previewURL = url; transcriptToken = UUID(); transcript = ""; selectText = false
-        if route == .folder { if browser.selection != [url] { browser.selection = [url] } } else { selected = [url.path] }
-        if snapshot.items.first(where: { $0.path == url.path })?.kind == .music || ["mp3", "m4a", "wav", "flac", "aiff"].contains(url.pathExtension.lowercased()) { play(url) }
+    }
+    func closePreview() { previewURL = nil; transcriptToken = UUID(); transcript = ""; selectText = false; focusOverlay(false) }
+    func focusOverlay(_ presented: Bool) {
+        guard let window = browser.window else { return }
+        if presented {
+            if overlayReturnResponder == nil { overlayReturnResponder = window.firstResponder }
+            window.makeFirstResponder(window)
+        } else if previewURL == nil && !onboardingPresented {
+            if let view = overlayReturnResponder as? NSView, view.window === window { window.makeFirstResponder(view) }
+            overlayReturnResponder = nil
+        }
+    }
+    func clearInspectorText() { transcriptToken = UUID(); transcript = ""; selectText = false }
+    private var previewOrder: [URL] {
+        if route == .folder { return browser.entries.filter { !$0.isFolder }.map(\.url) }
+        if previewSource.isEmpty { return items.filter { !$0.onlineOnly }.map(\.url) }
+        let unavailable = Set(snapshot.items.filter(\.onlineOnly).map(\.url))
+        return previewSource.filter { !unavailable.contains($0) }
+    }
+    func canStepPreview(_ offset: Int) -> Bool {
+        guard let previewURL, let index = previewOrder.firstIndex(of: previewURL) else { return false }
+        return previewOrder.indices.contains(index + offset)
     }
     func stepPreview(_ offset: Int) {
-        let urls = route == .folder ? browser.entries.filter { !$0.isFolder }.map(\.url) : items.map(\.url)
-        guard let previewURL, let index = urls.firstIndex(of: previewURL), urls.indices.contains(index + offset) else { return }; preview(urls[index + offset])
+        let urls = previewOrder
+        guard offset != 0, let previewURL, let index = urls.firstIndex(of: previewURL) else { return }
+        var next = index + offset
+        while urls.indices.contains(next) {
+            let candidate = urls[next]
+            if !FileAvailability.isOnlineOnly(candidate) { preview(candidate, order: urls); return }
+            next += offset > 0 ? 1 : -1
+        }
     }
     func copyText(_ urls: [URL]? = nil, copy: Bool = true) {
         guard !extracting else { return }
-        let urls = Array((urls ?? (!selected.isEmpty ? selected.sorted().map { URL(fileURLWithPath: $0) } : (previewURL.map { [$0] } ?? []))).prefix(20))
+        let urls = Array((urls ?? (route == .folder ? browser.selected.map(\.url) : !selected.isEmpty ? selected.sorted().map { URL(fileURLWithPath: $0) } : (activeURL.map { [$0] } ?? []))).prefix(20))
         guard !urls.isEmpty else { return }; extracting = true; let token = transcriptToken
         Task {
             let result = await Task.detached(priority: .utility) { () -> String in
@@ -534,10 +577,10 @@ final class LibraryModel: ObservableObject {
             if token == transcriptToken { transcript = result }; extracting = false
             if result.isEmpty { status = "No supported text could be read from the selected local files." }
             else if copy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(result, forType: .string); status = "Copied text from \(urls.count) file(s)." }
-            if token != transcriptToken && selectText, let previewURL { copyText([previewURL], copy: false) }
+            if token != transcriptToken && selectText, let activeURL { copyText([activeURL], copy: false) }
         }
     }
-    func loadSelectableText() { selectText.toggle(); if selectText && transcript.isEmpty { copyText(previewURL.map { [$0] }, copy: false) } }
+    func loadSelectableText() { selectText.toggle(); if selectText && transcript.isEmpty { copyText(activeURL.map { [$0] }, copy: false) } }
     func setTags() {
         guard let item = activeItem else { return }
         do { try item.revalidate(); try (item.url as NSURL).setResourceValue(tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }, forKey: .tagNamesKey); refresh() }

@@ -26,8 +26,13 @@ Do every step in both views.
 - [ ] Right-click inside a multi-selection: the selection stays and the menu acts on all of it.
 - [ ] Select three files and drag them to a Finder window: all three are copied.
 - [ ] Drag a file onto a subfolder in MacEx: it is copied; hold ⌘ to move.
-- [ ] Space opens the preview; Esc closes it; no second window appears.
-- [ ] Return renames the selected file; Esc cancels.
+- [ ] Space opens the large preview; arrows follow visible order without changing selection. Resize/fill-window controls work; Esc closes it and Return still starts rename without another click.
+- [ ] ⌘A, ⌘V and file-operation shortcuts cannot act on files behind a preview/help overlay.
+- [ ] Video/audio controls work and playback stops when the preview closes; no second file-manager window appears.
+- [ ] Return or a slow second name click renames in place; the extension is not initially selected. Esc cancels; invalid or occupied names show an inline error.
+- [ ] While renaming, scrolling, changing selection or navigating away cancels the edit; VoiceOver can reach the editable name.
+- [ ] ⌘L or the path background starts path editing; Tab completes a folder, Return opens it and Esc cancels.
+- [ ] Visible folder rows fill in recursive sizes and counts; partial/capped totals are marked. A change inside a nested folder updates the result.
 - [ ] ⌘Z after a rename, a move (drag onto a subfolder with ⌘) and Move to Trash puts the files back; the Edit menu reads "Undo Rename", "Undo Move", "Undo Move to Trash". ⇧⌘Z redoes each one.
 - [ ] Rename a file, edit and save it in another app, then ⌘Z: MacEx says it changed and leaves it alone.
 
@@ -73,6 +78,15 @@ Start the disposable server in a terminal with `zsh Scripts/sftp-fixture.sh`. It
 - [ ] ⌘N, ⌘F and every sidebar row reuse the one window; no second window opens.
 - [ ] The appearance toggle switches Light/Dark; Settings shows the same choice; it survives a relaunch.
 - [ ] Narrow the window to its minimum width: nothing overlaps; the inspector replaces the page below 760 pt.
+
+## 6. Phase 1 onboarding, help and cleanup choices
+
+- [ ] A fresh normal profile shows the three welcome steps; Add Folder uses the existing in-window chooser. Done/Skip prevents another welcome on relaunch.
+- [ ] Home, an empty folder and an empty search each expose a useful primary action.
+- [ ] ⌘/ lists current menu shortcuts and Escape closes it; toolbar hints match their menu shortcuts.
+- [ ] Free Up Space: ignore a file, an extension and a folder; relaunch and confirm the exclusions persist across all relevant cards.
+- [ ] Settings → Library → Free Up Space exclusions: Remove makes files eligible again; ordinary Library pages always retain the files.
+- [ ] Changing exclusions clears stale cleanup picks/reviews, including duplicate/similar groups that become singletons.
 
 ## Cleanup
 

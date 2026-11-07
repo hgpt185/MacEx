@@ -27,22 +27,25 @@ final class BrowserModel: ObservableObject {
     var previewRequested: ((URL) -> Void)?
     var quickLook: (() -> Void)?
     var previewSelectionChanged: (() -> Void)?
-    @Published var viewMode: BrowserViewMode = .list { didSet { stateChanged?() } }
+    @Published var viewMode: BrowserViewMode = .list { didSet { if oldValue != viewMode { cancelRename() }; stateChanged?() } }
     @Published var showPreview = false { didSet { stateChanged?() } }
     @Published var dropHint: String?
     @Published var isVisible = true
     @Published var location: URL
-    @Published var entries: [FileEntry] = [] { didSet { if oldValue != entries { entriesRevision &+= 1 } } }
+    @Published var entries: [FileEntry] = [] { didSet { if oldValue != entries { cancelRename(); entriesRevision &+= 1 } } }
     private(set) var entriesRevision = 0
     /// Deliberately not @Published: it changes on every click, and publishing it re-rendered the whole window
     /// (sidebar, toolbar, pages) per click. The file views and the status bar subscribe to `selectionChanges`.
     var selection: Set<URL> = [] {
         didSet {
             guard selection != oldValue else { return }
+            cancelRename()
             selectionChanges.send(selection); previewSelectionChanged?()
         }
     }
     let selectionChanges = PassthroughSubject<Set<URL>, Never>()
+    let renameChanges = PassthroughSubject<URL?, Never>()
+    private(set) var renameURL: URL?
     @Published var filter = "" { didSet { applyFilter(); stateChanged?() } }
     @Published var sort: FileSort = .name { didSet { applyFilter(); stateChanged?() } }
     @Published var showFileAccess = false
@@ -112,7 +115,7 @@ final class BrowserModel: ObservableObject {
         }
         workspace.jobs.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         workspace.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
-        NotificationCenter.default.publisher(for: .macexFilesChanged).sink { [weak self] _ in
+        NotificationCenter.default.publisher(for: .macexFilesChanged, object: workspace.jobs).sink { [weak self] _ in
             guard let self, isVisible else { return }; reload()
         }.store(in: &subscriptions)
         refreshVolumes()
@@ -135,7 +138,7 @@ final class BrowserModel: ObservableObject {
     func setVisible(_ visible: Bool) {
         guard isVisible != visible else { return }
         isVisible = visible
-        if visible { reload() } else { watcher = nil; loadControl?.cancel(); refreshTask?.cancel() }
+        if visible { reload() } else { FolderSizes.shared.cancelAll(); cancelRename(); watcher = nil; loadControl?.cancel(); refreshTask?.cancel() }
     }
 
     func refreshVolumes() {
@@ -146,6 +149,7 @@ final class BrowserModel: ObservableObject {
     }
 
     func navigate(_ url: URL, record: Bool = true) {
+        cancelRename()
         let target = url.resolvingSymlinksInPath().standardizedFileURL
         if record { navigationRequested?(target, nil) }
         endSearchListing()
@@ -162,6 +166,11 @@ final class BrowserModel: ObservableObject {
 
     func reload() {
         guard !searchActive else { return }
+        cancelRename()
+        FolderSizes.shared.clear()
+        // Descendant content may change while the immediate FileEntry metadata stays identical.
+        // Refresh displayed size subscriptions even when the listing itself does not change.
+        entriesRevision &+= 1; objectWillChange.send()
         loadControl?.cancel()
         let control = JobControl(); loadControl = control
         let url = location; let token = UUID(); generation = token
@@ -198,7 +207,7 @@ final class BrowserModel: ObservableObject {
             }
         }
     }
-    private func scheduleRefresh() {
+    func scheduleRefresh() {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
@@ -281,9 +290,24 @@ final class BrowserModel: ObservableObject {
     }
     func rename() {
         guard !busy, let entry = selected.first, selected.count == 1 else { return }
-        prompt(title: "Rename", message: "Enter a new name for this item.", initial: entry.name, button: "Rename") { [weak self] name in
-            self?.run(OperationRequest(.rename, sources: [entry.url], name: name))
+        renameURL = entry.url; renameChanges.send(entry.url)
+    }
+    func cancelRename() { renameURL = nil; renameChanges.send(nil) }
+    /// Returns a validation error without dismissing the editor. Successful renames use the normal undoable job.
+    func rename(_ url: URL, to name: String) -> String? {
+        guard renameURL == url, selection == [url], entries.contains(where: { $0.url == url }) else { cancelRename(); return nil }
+        guard !busy else { return "Wait for the current file operation to finish." }
+        do { try DirectoryReader.validateName(name) } catch { return error.localizedDescription }
+        guard name != url.lastPathComponent else { cancelRename(); return nil }
+        let destination = url.deletingLastPathComponent().appendingPathComponent(name)
+        // lstat also detects dangling symlinks, which fileExists would miss. The job rechecks races safely.
+        if let existing = try? FileIdentity(destination) {
+            let caseOnly = name.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame && existing == (try? FileIdentity(url))
+            if !caseOnly { return "An item with that name already exists." }
         }
+        cancelRename()
+        run(OperationRequest(.rename, sources: [url], name: name))
+        return nil
     }
     func duplicate() { run(OperationRequest(.duplicate, sources: selected.map(\.url))) }
     func trash() {

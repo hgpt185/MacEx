@@ -58,9 +58,9 @@ import MacExCore
     let library = LibraryModel(browser: browser, directory: state, defaultRoots: [ordinary])
     defer { library.shutdown(); browser.setVisible(false) }
     // This actor turn precedes the asynchronous settings load, as can happen when
-    // another workspace posts a restore notification during startup.
+    // its workspace posts a restore notification during startup.
     #expect(!library.loaded)
-    NotificationCenter.default.post(name: .macexFilesChanged, object: nil)
+    NotificationCenter.default.post(name: .macexFilesChanged, object: browser.workspace.jobs)
     #expect(!library.scanning)
     for _ in 0..<500 { if library.loaded && !library.scanning { break }; try await Task.sleep(for: .milliseconds(10)) }
     try #require(library.loaded && !library.scanning)

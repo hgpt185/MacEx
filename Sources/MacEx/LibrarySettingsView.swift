@@ -133,6 +133,16 @@ struct LibrarySettingsView: View {
                     }
                 }
             }
+            SettingsGroup(title: "Free Up Space exclusions", footer: "Ignored files stay in your library. Remove a choice to include matching files in cleanup suggestions again.") {
+                if model.settings.cleanupExclusions.isEmpty {
+                    SettingsRow("No exclusions", detail: "Right-click a file in Free Up Space to ignore that file, its extension or its enclosing folder.") { EmptyView() }
+                }
+                ForEach(model.settings.cleanupExclusions) { exclusion in
+                    SettingsRow(exclusion.title, detail: exclusion.detail, symbol: exclusion.kind == .folder ? "folder" : "doc") {
+                        HeaderButton(title: "Remove") { model.removeCleanupExclusion(exclusion) }
+                    }
+                }
+            }
             if !(model.snapshot.issues ?? []).isEmpty || model.snapshot.limitReached == true {
                 SettingsGroup(title: "Needs attention", footer: model.snapshot.limitReached == true ? "The library reached a size limit. Remove broad folders or pick narrower ones, then refresh." : nil) {
                     ForEach(Array((model.snapshot.issues ?? []).prefix(12).enumerated()), id: \.offset) { _, issue in
@@ -315,11 +325,12 @@ private struct UpdateSettingsView: View {
 struct SimilarPhotosView: View {
     @ObservedObject var model: LibraryModel
     @StateObject private var state = SimilarPhotoState()
+    private var groups: [CleanupSimilarGroup] { model.cleanupSimilarGroups(state.groups) }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-        PageHeader(symbol: "rectangle.on.rectangle", title: "Similar Photos", detail: state.groups.isEmpty ? nil : "\(state.groups.count) groups") {
+        PageHeader(symbol: "rectangle.on.rectangle", title: "Similar Photos", detail: groups.isEmpty ? nil : "\(groups.count) groups") {
             HeaderButton(title: state.running ? "Cancel" : "Find Look-alikes", symbol: state.running ? "xmark" : "sparkle.magnifyingglass") {
-                if state.running { state.cancel() } else { state.scan(model.snapshot.items.sorted { $0.modified > $1.modified }) }
+                if state.running { state.cancel() } else { state.scan(model.snapshot.items.filter { !model.isCleanupExcluded($0.url) }.sorted { $0.modified > $1.modified }) }
             }.disabled(model.scanning)
         }
         VStack(alignment: .leading, spacing: 12) {
@@ -327,10 +338,18 @@ struct SimilarPhotosView: View {
             HStack { Text("Similarity").font(.system(size: 12)); Slider(value: $state.distance, in: 0.01...0.5).frame(maxWidth: 260); Text(String(format: "%.2f", state.distance)).font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary); if state.running { ProgressView().controlSize(.small) } }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
-                    ForEach(state.groups) { group in
+                    ForEach(groups) { group in
                         VStack(alignment: .leading, spacing: 12) {
                             Text("\(group.items.count) visually similar images").font(.headline)
-                            ForEach(group.items) { item in HStack { LibraryThumbnail(url: item.url, symbol: "photo").frame(width: 130, height: 100); VStack(alignment: .leading) { Text(item.name); Text(item.path).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Preview") { model.preview(item.url) }; Toggle("Select", isOn: Binding(get: { model.cleanupSelection.contains(item.path) }, set: { if $0 { model.cleanupSelection.insert(item.path) } else { model.cleanupSelection.remove(item.path) } })) } }
+                            ForEach(group.items) { item in
+                                HStack {
+                                    LibraryThumbnail(url: item.url, symbol: "photo").frame(width: 130, height: 100)
+                                    VStack(alignment: .leading) { Text(item.name); Text(item.path).font(.caption).foregroundStyle(.secondary) }
+                                    Spacer()
+                                    Button("Preview") { model.preview(item.url, order: group.items.map(\.url)) }
+                                    Toggle("Select", isOn: Binding(get: { model.cleanupSelection.contains(item.path) }, set: { if $0 { model.cleanupSelection.insert(item.path) } else { model.cleanupSelection.remove(item.path) } }))
+                                }.contextMenu { CleanupIgnoreMenu(model: model, url: item.url) }
+                            }
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surface))
                             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.hairline, lineWidth: 1))
@@ -339,9 +358,9 @@ struct SimilarPhotosView: View {
             }
             HStack { Text("Only explicit selections are removed. Keep at least one member of each group.").font(.caption).foregroundStyle(.secondary); Spacer(); Button("Review Selected") {
                 let selected = model.cleanupSelection
-                guard state.groups.allSatisfy({ group in !group.items.allSatisfy { selected.contains($0.path) } }) else { state.status = "Keep at least one photo from each selected group."; return }
-                model.prepareTrash(state.groups.flatMap(\.items).filter { selected.contains($0.path) }, retaining: state.groups.compactMap { $0.items.first { !selected.contains($0.path) } })
-            }.disabled(model.cleanupSelection.isEmpty || state.running) }
+                guard groups.allSatisfy({ group in !group.items.allSatisfy { selected.contains($0.path) } }) else { state.status = "Keep at least one photo from each selected group."; return }
+                model.prepareTrash(groups.flatMap(\.items).filter { selected.contains($0.path) }, retaining: groups.compactMap { $0.items.first { !selected.contains($0.path) } })
+            }.disabled(!groups.flatMap(\.items).contains { model.cleanupSelection.contains($0.path) } || state.running) }
         }.padding(.horizontal, 24).padding(.bottom, 16)
         }.onDisappear { state.cancel() }
     }

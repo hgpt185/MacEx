@@ -18,10 +18,10 @@ struct FileTable: NSViewRepresentable {
         table.backgroundColor = Theme.canvasNS; table.gridStyleMask = []
         scroll.drawsBackground = true; scroll.backgroundColor = Theme.canvasNS; scroll.borderType = .noBorder
         table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
-        let columns: [(String, String, CGFloat)] = [("name", "Name", 310), ("modified", "Date Modified", 155), ("size", "Size", 90), ("kind", "Kind", 140)]
+        let columns: [(String, String, CGFloat)] = [("name", "Name", 310), ("modified", "Date Modified", 155), ("size", "Size", 130), ("kind", "Kind", 140)]
         for (key, title, width) in columns {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(key))
-            if key == "size" { column.headerToolTip = "Folder sizes are not calculated. Unknown sizes appear last unless Folders First is enabled." }
+            if key == "size" { column.headerToolTip = "Visible folders show recursive logical bytes and item counts, capped at 50,000 entries. Partial totals are marked ≥. Sorting uses file sizes; folders remain unknown." }
             column.title = title; column.width = width; column.minWidth = key == "name" ? 180 : 65
             column.sortDescriptorPrototype = NSSortDescriptor(key: key, ascending: true)
             table.addTableColumn(column)
@@ -58,6 +58,9 @@ struct FileTable: NSViewRepresentable {
             coordinator.updating = false
         }
     }
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        coordinator.stopFolderSizes()
+    }
 
     @MainActor final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         let model: BrowserModel
@@ -70,10 +73,24 @@ struct FileTable: NSViewRepresentable {
             let formatter = DateFormatter(); formatter.dateStyle = .medium; formatter.timeStyle = .short; formatter.doesRelativeDateFormatting = true; return formatter
         }()
         private var selectionObserver: AnyCancellable?
+        private var renameObserver: AnyCancellable?
+        private var folderObserver: AnyCancellable?
+        private var folderEvents: IndexEvents?
         init(_ model: BrowserModel) { self.model = model }
         func observeSelection() {
             selectionObserver = model.selectionChanges.sink { [weak self] in self?.apply($0) }
+            renameObserver = model.renameChanges.sink { [weak self] url in
+                guard let self else { return }
+                if let url { table?.beginRename(url) } else { table?.endRename() }
+            }
+            folderObserver = model.$location.removeDuplicates().sink { [weak self] url in
+                guard let self else { return }
+                folderEvents = try? IndexEvents(roots: [url.path]) { [weak self] in
+                    Task { @MainActor [weak self] in self?.model.scheduleRefresh() }
+                }
+            }
         }
+        func stopFolderSizes() { folderObserver = nil; folderEvents = nil; FolderSizes.shared.cancelAll() }
         /// Mirrors a model selection into the table. Changes that came from the table itself are already in place and cost nothing.
         func apply(_ wanted: Set<URL>) {
             guard let table else { return }
@@ -85,6 +102,7 @@ struct FileTable: NSViewRepresentable {
         }
         func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+            table?.prepareFileDrag()
             guard !model.busy, entries.indices.contains(row) else { return nil }; return entries[row].url as NSURL
         }
         private func destination(_ row: Int, _ operation: NSTableView.DropOperation) -> URL {
@@ -103,6 +121,11 @@ struct FileTable: NSViewRepresentable {
             guard entries.indices.contains(row), let column = tableColumn else { return nil }
             let entry = entries[row]
             let cellID = NSUserInterfaceItemIdentifier("cell-" + column.identifier.rawValue)
+            if column.identifier.rawValue == "size", entry.isFolder {
+                let cell = (tableView.makeView(withIdentifier: NSUserInterfaceItemIdentifier("folder-size-cell"), owner: nil) as? FolderSizeCell) ?? FolderSizeCell(frame: .zero)
+                cell.identifier = NSUserInterfaceItemIdentifier("folder-size-cell"); cell.configure(entry)
+                return cell
+            }
             let cell: NSTableCellView
             if let reused = tableView.makeView(withIdentifier: cellID, owner: nil) as? NSTableCellView { cell = reused }
             else {
@@ -179,6 +202,25 @@ struct FileTable: NSViewRepresentable {
     weak var coordinator: FileTable.Coordinator?
     private var receivedFocus = false
     private var menuActions: FileMenuActions?
+    private let renameEditor = InlineRenameEditor()
+    private var slowRenameClick = SlowRenameClick()
+    private var nativeDragStarted = false
+    func beginRename(_ url: URL) {
+        guard let model, let coordinator, let row = coordinator.entries.firstIndex(where: { $0.url == url }) else { return }
+        scrollRowToVisible(row)
+        let column = column(withIdentifier: NSUserInterfaceItemIdentifier("name"))
+        guard let cell = view(atColumn: column, row: row, makeIfNecessary: true) as? NSTableCellView, let label = cell.textField else { return }
+        renameEditor.begin(coordinator.entries[row], label: label, in: self, model: model)
+    }
+    func endRename() { renameEditor.end(); slowRenameClick.reset() }
+    func prepareFileDrag() { nativeDragStarted = true; slowRenameClick.reset(); model?.cancelRename() }
+    private func nameURL(at point: NSPoint) -> URL? {
+        let row = row(at: point), column = column(withIdentifier: NSUserInterfaceItemIdentifier("name"))
+        guard let coordinator, coordinator.entries.indices.contains(row), column >= 0,
+              let cell = view(atColumn: column, row: row, makeIfNecessary: false) as? NSTableCellView,
+              let label = cell.textField, label.convert(label.bounds, to: self).contains(point) else { return nil }
+        return coordinator.entries[row].url
+    }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if !receivedFocus, let window { window.makeFirstResponder(self); receivedFocus = true }
@@ -205,9 +247,12 @@ struct FileTable: NSViewRepresentable {
         let point = convert(event.locationInWindow, from: nil)
         let row = row(at: point)
         let flags = event.modifierFlags.intersection([.command, .shift, .control])
+        if model?.renameURL != nil { model?.cancelRename() }
         if event.clickCount == 2, row >= 0, let model, let coordinator, coordinator.entries.indices.contains(row), flags.isEmpty {
             model.open(coordinator.entries[row]); return
         }
+        let nameURL = flags.isEmpty && event.clickCount == 1 ? nameURL(at: point) : nil
+        let renameAfterClick = nameURL.map { model?.selection == [$0] && slowRenameClick.shouldRename($0, at: event.timestamp) } ?? false
         // Like Finder, the name drags the file; empty space below the rows and the other columns start a
         // rubber-band selection instead (a plain click there still selects that row).
         let column = column(at: point)
@@ -222,18 +267,30 @@ struct FileTable: NSViewRepresentable {
             marqueeToggles = flags.contains(.command)
             return
         }
+        nativeDragStarted = false
         super.mouseDown(with: event)
+        if let nameURL, !nativeDragStarted, model?.selection == [nameURL] {
+            if renameAfterClick { model?.rename() }
+            else { slowRenameClick.record(nameURL, at: event.timestamp) }
+        }
+        else { slowRenameClick.reset() }
     }
     private var marqueeStart: NSPoint?
     private var marqueeBase = IndexSet()
     private var marqueeToggles = false
     private var marqueeView: MarqueeView?
     override func mouseDragged(with event: NSEvent) {
+        slowRenameClick.reset()
         guard let start = marqueeStart else { super.mouseDragged(with: event); return }
         autoscroll(with: event)
         updateMarquee(from: start, to: convert(event.locationInWindow, from: nil))
     }
     override func mouseUp(with event: NSEvent) {
+        if model?.renameURL == nil, event.clickCount == 1, event.modifierFlags.intersection([.command, .shift, .control]).isEmpty,
+           let url = nameURL(at: convert(event.locationInWindow, from: nil)), model?.selection == [url], !nativeDragStarted {
+            if slowRenameClick.shouldRename(url, at: event.timestamp) { model?.rename(); return }
+            slowRenameClick.record(url, at: event.timestamp)
+        }
         guard marqueeStart != nil else { super.mouseUp(with: event); return }
         marqueeView?.removeFromSuperview(); marqueeView = nil; marqueeStart = nil
     }
@@ -263,6 +320,7 @@ struct FileTable: NSViewRepresentable {
     override func draggingExited(_ sender: (any NSDraggingInfo)?) { model?.dropHint = nil; super.draggingExited(sender) }
     override func concludeDragOperation(_ sender: (any NSDraggingInfo)?) { model?.dropHint = nil; super.concludeDragOperation(sender) }
     override func menu(for event: NSEvent) -> NSMenu? {
+        model?.cancelRename()
         let row = row(at: convert(event.locationInWindow, from: nil))
         if row >= 0 && !selectedRowIndexes.contains(row) { selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
         if row < 0 { deselectAll(nil) }

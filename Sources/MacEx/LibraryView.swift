@@ -53,13 +53,13 @@ struct SingleWindowView: View {
                 VStack(spacing: 0) {
                     topbar
                     GeometryReader { geometry in
-                        if (model.previewURL != nil || model.inspector) && geometry.size.width < 760 {
+                        if model.inspector && geometry.size.width < 760 {
                             LibraryInspector(model: model).frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .transition(.opacity)
                         } else {
                             HSplitView {
                                 workspacePage
-                                if model.previewURL != nil || model.inspector {
+                                if model.inspector {
                                     LibraryInspector(model: model).frame(minWidth: 320, idealWidth: 380, maxWidth: 650)
                                         .transition(.move(edge: .trailing).combined(with: .opacity))
                                 }
@@ -70,9 +70,13 @@ struct SingleWindowView: View {
                 }.background(Theme.canvas)
             }
             .animation(Theme.snappy, value: model.sidebarVisible)
-            .animation(Theme.snappy, value: model.previewURL != nil || model.inspector)
+            .animation(Theme.snappy, value: model.inspector)
+            .allowsHitTesting(model.previewURL == nil && !model.shortcutsPresented && !model.onboardingPresented)
             // Files under an in-window overlay must not start drags through it.
-            .environment(\.fileDragEnabled, !browser.showingOperations && !model.cleanupReview && interaction.request == nil)
+            .environment(\.fileDragEnabled, model.previewURL == nil && !model.shortcutsPresented && !model.onboardingPresented && !browser.showingOperations && !model.cleanupReview && interaction.request == nil)
+            if model.previewURL != nil { LibraryPreviewOverlay(model: model) }
+            if model.shortcutsPresented { ShortcutHelpOverlay { model.shortcutsPresented = false } }
+            if model.onboardingPresented { LibraryOnboardingOverlay(model: model) }
             if browser.showingOperations { operationsOverlay.transition(.move(edge: .top).combined(with: .opacity)) }
             if model.cleanupReview { reviewOverlay }
             InAppInteractionView(model: interaction)
@@ -82,13 +86,14 @@ struct SingleWindowView: View {
             .onChange(of: browser.viewMode) { _, value in model.settings.grid = value == .icons; model.save() }
             .onChange(of: model.selected) { _, _ in
                 if model.previewURL != nil, model.selected.count == 1, let path = model.selected.first, model.previewURL?.path != path { model.preview(URL(fileURLWithPath: path)) }
-                if model.inspector { model.tags = model.activeItem?.tags.joined(separator: ", ") ?? "" }
+                if model.inspector { model.clearInspectorText(); model.tags = model.activeItem?.tags.joined(separator: ", ") ?? "" }
             }
             .onReceive(NotificationCenter.default.publisher(for: .macexFocusFilter)) { _ in searchFocused = true }
+            .onChange(of: model.onboardingPresented) { _, presented in model.focusOverlay(presented) }
             .onChange(of: browser.showPreview) { _, value in if value { model.inspector = true } }
             .onChange(of: model.inspector) { _, open in
-                guard open, model.route == .folder, browser.selected.count == 1, let entry = browser.selected.first, !entry.isFolder else { return }
-                model.preview(entry.url)
+                guard open else { return }
+                model.closePreview()
             }
     }
     private var workspacePage: some View {
@@ -263,7 +268,7 @@ struct SingleWindowView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 320), spacing: 20)], spacing: 22) {
                     ForEach(Array(LibraryKind.allCases.filter { $0 != .other }.enumerated()), id: \.element) { i, kind in categoryCard(kind, index: i) }
                 }
-                if model.discoveryRoots.isEmpty {
+                if model.snapshot.items.isEmpty && !model.scanning {
                     HStack(spacing: 15) {
                         Image(systemName: "folder.badge.plus").font(.largeTitle).foregroundStyle(accent)
                         VStack(alignment: .leading, spacing: 5) { Text("Your library starts with a folder").font(.headline); Text("Choose the folders you want to see here. Local files stay local; online-only contents are skipped.").font(.callout).foregroundStyle(.secondary) }
@@ -344,7 +349,17 @@ struct SingleWindowView: View {
             if model.items.isEmpty && !model.searchingText {
                 Group {
                     if model.scanning { ContentUnavailableView("Finding files on this Mac", systemImage: "externaldrive.badge.magnifyingglass", description: Text("Your folders and applications are being added to the library. Categories update as discovery completes.")) }
-                    else { ContentUnavailableView(model.discoveryRoots.isEmpty ? "Add your folders" : "No matching files", systemImage: "magnifyingglass", description: Text("Filters use the available library metadata and recognized text. Missing camera, source or date metadata is excluded by those filters.")) }
+                    else {
+                        ContentUnavailableView {
+                            Label(model.discoveryRoots.isEmpty ? "Add your folders" : "No matching files", systemImage: "magnifyingglass")
+                        } description: {
+                            Text("Filters use the available library metadata and recognized text. Missing camera, source or date metadata is excluded by those filters.")
+                        } actions: {
+                            if model.discoveryRoots.isEmpty { Button("Add Folder…", action: model.addFolder).buttonStyle(.borderedProminent) }
+                            else if model.route == .search { Button("Clear Search") { model.searchText = ""; model.search("") }.buttonStyle(.borderedProminent) }
+                            else { Button("Add Folder…", action: model.addFolder).buttonStyle(.borderedProminent) }
+                        }
+                    }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 LibraryFileBrowser(items: model.items, selection: $model.selected, sortOrder: $model.sortOrder, grid: browser.viewMode == .icons,
@@ -354,12 +369,12 @@ struct SingleWindowView: View {
         }.animation(Theme.gentle, value: browser.viewMode)
     }
     /// Menu for a file; acts on the whole selection when the file is part of it.
-    private func itemMenu(_ item: LibraryFile) -> [MenuEntry] {
+    private func itemMenu(_ item: LibraryFile, order: [URL]? = nil) -> [MenuEntry] {
         let targets = model.selected.contains(item.path) ? model.selected.sorted().map { URL(fileURLWithPath: $0) } : [item.url]
         let many = targets.count > 1
         return [
             MenuEntry(title: many ? "Open \(targets.count) Items" : "Open", symbol: "arrow.up.forward.app") { for url in targets.prefix(10) { FileOpener.open(url) } },
-            MenuEntry(title: "Quick Look", symbol: "eye") { model.preview(item.url) },
+            MenuEntry(title: "Quick Look", symbol: "eye") { model.preview(item.url, order: order) },
             .separator,
             MenuEntry(title: "Copy Text", symbol: "doc.on.clipboard") { model.copyText(targets) },
             MenuEntry(title: many ? "Copy Paths" : "Copy Path", symbol: "link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(targets.map(\.path).joined(separator: "\n"), forType: .string) },
@@ -429,26 +444,35 @@ struct SingleWindowView: View {
     private func recentTile(_ item: LibraryFile, in row: [LibraryFile]) -> some View {
         let clicks = ClickSelection(selection: $model.selected, anchor: $clickAnchor, order: row.map(\.path)) { _ in FileOpener.open(item.url) }
         return LibraryTile(item: item, selected: model.selected.contains(item.path), size: 150)
-            .onTapGesture { clicks.click(item.path) }
+            .onTapGesture { clicks.click(item.path); model.previewSource = row.map(\.url) }
             .modifier(LibraryDragItem {
                 guard model.selected.contains(item.path), model.selected.count > 1 else { model.selected = [item.path]; clickAnchor = item.path; return [item.url] }
                 return model.selected.sorted().map { URL(fileURLWithPath: $0) }
             })
-            .rightClickMenu(select: { if !model.selected.contains(item.path) { model.selected = [item.path] } }, entries: { itemMenu(item) })
+            .rightClickMenu(select: { if !model.selected.contains(item.path) { model.selected = [item.path] }; model.previewSource = row.map(\.url) }, entries: { itemMenu(item, order: row.map(\.url)) })
     }
     private var folderPage: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                breadcrumbs
-                Spacer(minLength: 8)
+                FolderPathBar(browser: browser) { breadcrumbs }
                 ToolbarIconButton(symbol: "folder.badge.plus", help: "New Folder…") { browser.newFolder() }
                 ToolbarIconButton(symbol: "arrow.right.circle", help: "Go to Folder…") { browser.goToFolder() }
                 ToolbarIconButton(symbol: "pin", help: "Pin Folder") { browser.pinCurrentFolder() }
                 viewControls
             }.padding(.horizontal, 18).padding(.top, 4).padding(.bottom, 10)
             if let error = browser.errorMessage { Text(error).foregroundStyle(.orange).font(.caption).padding(.horizontal, 22).padding(.bottom, 6) }
-            Group { if browser.viewMode == .list { FileTable(model: browser) } else { FileIcons(model: browser) } }
-                .transition(.opacity)
+            ZStack {
+                Group { if browser.viewMode == .list { FileTable(model: browser) } else { FileIcons(model: browser) } }
+                if browser.entries.isEmpty && !browser.isLoading {
+                    ContentUnavailableView {
+                        Label(browser.filter.isEmpty && !browser.searchActive ? "This folder is empty" : "No matching files", systemImage: "folder")
+                    } actions: {
+                        if !browser.filter.isEmpty { Button("Clear Filter") { browser.filter = "" }.buttonStyle(.borderedProminent) }
+                        else if browser.searchActive { Button("Open Folder") { browser.navigate(browser.location) }.buttonStyle(.borderedProminent) }
+                        else { Button("New Folder…", action: browser.newFolder).buttonStyle(.borderedProminent) }
+                    }.allowsHitTesting(true)
+                }
+            }.transition(.opacity)
         }.animation(Theme.gentle, value: browser.viewMode)
     }
     /// Clickable path; the last component is emphasized and earlier ones drop away as space runs out.
