@@ -13,6 +13,8 @@ final class MacExUITests: XCTestCase {
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Destination"), withIntermediateDirectories: true)
         try Data("Disposable inline preview fixture\n".utf8).write(to: root.appendingPathComponent("Welcome.txt"))
         let app = XCUIApplication(bundleIdentifier: "local.macex.app.uihost")
+        // Keep CI crashes noninteractive and retain the full stack in the result bundle.
+        app.launchEnvironment["SWIFT_BACKTRACE"] = "enable=yes,interactive=no,preset=full,limit=none"
         defer { app.terminate(); try? FileManager.default.removeItem(at: base) }
         // The sidebar's Tools section remembers being collapsed; pin it open so Free Up Space is always reachable.
         app.launchArguments = ["--folder", root.path, "--state-directory", base.appendingPathComponent("State").path, "-fileAccessChoiceSeen", "YES", "-sidebarToolsExpanded", "YES"]
