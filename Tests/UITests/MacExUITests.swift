@@ -80,7 +80,8 @@ final class MacExUITests: XCTestCase {
                 let file = mode == "2" ? app.tables["file-list"].staticTexts["Welcome.txt"] : app.cells["file-Welcome.txt"]
                 XCTAssertTrue(file.waitForExistence(timeout: 5), app.debugDescription)
                 file.click(); app.typeKey(.return, modifierFlags: [])
-                let editor = app.textFields["inline-rename"]
+                // Icon view exposes the NSTextField and its active field-editor child.
+                let editor = app.textFields.matching(identifier: "inline-rename").firstMatch
                 XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
                 XCTAssertEqual(editor.value as? String, "Welcome.txt")
                 XCTAssertTrue(app.staticTexts["Destination"].exists || app.cells["file-Destination"].exists, "Other file rows must stay reachable while editing")
