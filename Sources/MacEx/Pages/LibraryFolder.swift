@@ -40,29 +40,45 @@ extension SingleWindowView {
     func crumbRow(_ crumbs: [URL], keep: Int) -> some View {
         let shown = Array(crumbs.suffix(keep))
         let clipped = crumbs.count > shown.count
+        let navigate: @MainActor (URL) -> Void = { [browser] in browser.navigate($0) }
         return HStack(spacing: 2) {
             if clipped, let hidden = crumbs.dropLast(shown.count).last {
                 Button { browser.navigate(hidden) } label: { Text("…").foregroundStyle(.tertiary).padding(.horizontal, 5).padding(.vertical, 4) }
                     .buttonStyle(CrumbStyle()).help(hidden.path)
             }
-            ForEach(Array(shown.enumerated()), id: \.element) { index, url in
-                let last = index == shown.count - 1
-                if index > 0 || clipped { Image(systemName: "chevron.compact.right").font(.system(size: 11)).foregroundStyle(.quaternary) }
-                let name = url.path == "/" ? "Macintosh HD" : url.lastPathComponent
-                if last {
-                    // The current folder is the page title: plain text (not a button), so it reads as the heading.
-                    HStack(spacing: 5) {
-                        Image(nsImage: FolderArt.image).resizable().frame(width: 16, height: 16).accessibilityHidden(true)
-                        Text(name).font(.system(size: 15, weight: .semibold)).lineLimit(1).fixedSize()
-                            .accessibilityIdentifier("folder-title").accessibilityAddTraits(.isHeader)
-                    }.padding(.horizontal, 6).padding(.vertical, 4).help(url.path)
-                } else {
-                    Button { browser.navigate(url) } label: {
-                        Text(name).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
-                            .padding(.horizontal, 6).padding(.vertical, 4).contentShape(Rectangle())
-                    }.buttonStyle(CrumbStyle()).help(url.path)
-                }
+            ForEach(Array(shown.enumerated()), id: \.element) { @Sendable index, url in
+                FolderBreadcrumb(url: url, last: index == shown.count - 1,
+                                 chevron: index > 0 || clipped, navigate: navigate)
             }
+        }
+    }
+}
+
+/// SwiftUI may construct lazy ForEach content off-main; native artwork and actions stay in the view body.
+@MainActor private struct FolderBreadcrumb: View {
+    let url: URL
+    let last: Bool
+    let chevron: Bool
+    let navigate: @MainActor (URL) -> Void
+
+    nonisolated init(url: URL, last: Bool, chevron: Bool, navigate: @escaping @MainActor (URL) -> Void) {
+        self.url = url; self.last = last; self.chevron = chevron; self.navigate = navigate
+    }
+
+    var body: some View {
+        let name = url.path == "/" ? "Macintosh HD" : url.lastPathComponent
+        if chevron { Image(systemName: "chevron.compact.right").font(.system(size: 11)).foregroundStyle(.quaternary) }
+        if last {
+            HStack(spacing: 5) {
+                Image(nsImage: FolderArt.image).resizable().frame(width: 16, height: 16).accessibilityHidden(true)
+                Text(name).font(.system(size: 15, weight: .semibold)).lineLimit(1).fixedSize()
+                    .accessibilityIdentifier("folder-title").accessibilityAddTraits(.isHeader)
+            }.padding(.horizontal, 6).padding(.vertical, 4).help(url.path)
+        } else {
+            Button { navigate(url) } label: {
+                Text(name).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                    .padding(.horizontal, 6).padding(.vertical, 4).contentShape(Rectangle())
+            }.buttonStyle(CrumbStyle()).help(url.path)
         }
     }
 }

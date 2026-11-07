@@ -11,7 +11,7 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 
 Local integrated verification covers **96 core + 73 app tests**, 27 offline tests, the release bundle and the native Xcode UI-test build. The merge gate is the required GitHub Actions `macos` check, including native UI execution and universal preview packaging; its live result is linked from PR #2. Main protection requires an up-to-date successful check, including for administrators.
 
-CI follow-up corrected path-field attachment focus, heading label/value assertions and restoration of the native filename's static-text accessibility role after Escape. The role regression failed in both list and icon views before the fix, then passed. See [Phase 1 verification](verification/PHASE1-DAILY-USE.md) and [background/code-health verification](verification/BACKGROUND-CODE-HEALTH.md) for evidence and validation limits.
+CI follow-up corrected path-field attachment focus, heading label/value assertions restoration of the native filename's static-text accessibility role after Escape, and lazy breadcrumb construction without off-main state access. The role regression failed in both list and icon views before the fix, then passed. See [Phase 1 verification](verification/PHASE1-DAILY-USE.md) and [background/code-health verification](verification/BACKGROUND-CODE-HEALTH.md) for evidence and validation limits.
 
 The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its subsequent `main` run 42247209597 failed to acquire a hosted runner; no test step ran. This historical infrastructure failure is separate from the Phase 1 local results.
 
