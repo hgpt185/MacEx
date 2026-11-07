@@ -7,9 +7,11 @@ This plan turns the post-redesign review into ordered, testable work. Each item 
 
 ## Progress
 
-The next planned work is published as [draft PR #3](https://github.com/hgpt185/MacEx/pull/3), implementation commit `78d50ff`, stacked on Phase 1: **21 (background/battery policy) and 24–27 (code health and required CI)**. Local integrated checks passed: **96 core + 73 app tests**, 27 offline tests, release build and native UI-test build. Review findings were reproduced and fixed. See [background/code-health verification](verification/BACKGROUND-CODE-HEALTH.md) for details and pending platform checks.
+**Completed implementation:** items **1–13, 21 and 24–27**. Phase 1 and the background/code-health continuation are consolidated in [PR #2](https://github.com/hgpt185/MacEx/pull/2), the delivery record for `main`. [PR #3](https://github.com/hgpt185/MacEx/pull/3) was merged into Phase 1 at `fa6adb5` on 2026-11-07.
 
-Phase 1 items **7–13 are implemented and locally verified** on `codex/phase1-daily-use`, based on `2868e39`. Published as [PR #2](https://github.com/hgpt185/MacEx/pull/2), implementation commit `7a1f1ef`; not merged into `main` yet. Final local verification: **96 core tests and 63 app tests passed**, including disposable SFTP fixtures; offline-search checks, the release bundle and the native Xcode UI-test build also passed. Local native UI execution is blocked by disabled Automation Mode; CI run 42343909326 exposed two macOS 15 follow-up cases addressed on the continuation branch and awaiting CI retest. See [Phase 1 verification](verification/PHASE1-DAILY-USE.md) for evidence, performance measurements and remaining manual/platform checks.
+Local integrated verification covers **96 core + 73 app tests**, 27 offline tests, the release bundle and the native Xcode UI-test build. The merge gate is the required GitHub Actions `macos` check, including native UI execution and universal preview packaging; its live result is linked from PR #2. Main protection requires an up-to-date successful check, including for administrators.
+
+CI follow-up corrected path-field attachment focus, heading label/value assertions and restoration of the native filename's static-text accessibility role after Escape. The role regression failed in both list and icon views before the fix, then passed. See [Phase 1 verification](verification/PHASE1-DAILY-USE.md) and [background/code-health verification](verification/BACKGROUND-CODE-HEALTH.md) for evidence and validation limits.
 
 The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its subsequent `main` run 42247209597 failed to acquire a hosted runner; no test step ran. This historical infrastructure failure is separate from the Phase 1 local results.
 
@@ -21,16 +23,18 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 | ✅ | 4. Manual interaction checklist written | `dd95527` |
 | ✅ | 5. First library scan about 8× faster | `dd95527` |
 | ✅ | 6. Undo and Redo for move, rename and trash | `0d1a794` |
-| ✅ | 7–13. Remaining Phase 1 features | [PR #2](https://github.com/hgpt185/MacEx/pull/2), `7a1f1ef`; merge and CI pending |
-| ✅ | 21. Background and battery-aware watching | [PR #3](https://github.com/hgpt185/MacEx/pull/3); merge pending |
-| ✅ | 24–26. View extraction, public settings layout, file-effect services | [PR #3](https://github.com/hgpt185/MacEx/pull/3); merge pending |
-| ✅ | 27. CI on every push and required `macos` check | `main` protection configured and verified; skipped-check naming fix on continuation branch |
+| ✅ | 7–13. Remaining Phase 1 features | [PR #2](https://github.com/hgpt185/MacEx/pull/2), Phase 1 implementation; consolidated delivery to `main` |
+| ✅ | 21. Background and battery-aware watching | PR #3 → Phase 1 → PR #2 |
+| ✅ | 24–26. View extraction, public settings layout, file-effect services | PR #3 → Phase 1 → PR #2 |
+| ✅ | 27. CI on every push and required `macos` check | `main` protection configured and verified; workflow included in PR #2 |
 
 **Open, needs the owner:**
 - Run the manual checklist (`docs/verification/INTERACTION-CHECKLIST.md`) once on a release build. It has not been run yet. The Finder drop for item 2 and ⌘Z after Move to Trash matter most.
-- Native CI must execute the follow-up path-focus/rename-label cases. Phase 1 run 42343909326 exposed those macOS 15 failures; fixes are on the continuation branch. Required `macos` protection is now configured on `main`.
+- Complete physical battery/idle CPU measurements, fresh-profile onboarding, provider/volume checks, Intel/macOS 14 runtime checks and the full accessibility pass. Local Automation Mode is disabled; native UI execution runs in the required CI gate.
 
-**Next:** review/merge the continuation into Phase 1, then PR #2 into `main` after required CI is green. Complete the pending manual release checks. Next feature work is Phase 2, starting with item 15 (Workspaces), then 14 (split pane). Items 22–23 remain driven by measured need.
+**Remaining development:** items **14–20, 22–23 and 28–29**. Developer ID/notarization (28) is optional for GitHub previews under `ROADMAP.md`.
+
+**Next:** complete the pending manual release checks, then begin Phase 2 with **15 (Workspaces)** followed by **14 (split pane)**. Items 22–23 remain driven by measured need.
 
 **Builds:** The background/code-health continuation release build is `dist/MacEx.app` (version string remains 0.8.1). `/Applications/MacEx.app` was not replaced; its previously recorded build is `0d1a794`.
 
@@ -47,10 +51,10 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 | Phase | Theme | Items | Goal | Status |
 |---|---|---|---|---|
 | 0 | Lock in the redesign | 1–5 | Merge `ui-refresh` safely with verified behavior | Done; manual checklist run pending |
-| 1 | Everyday file management | 6–13 | Make common actions faster and more forgiving | Implemented; 7–13 on feature branch, merge/native UI run pending |
+| 1 | Everyday file management | 6–13 | Make common actions faster and more forgiving | Implemented; consolidated delivery through PR #2 |
 | 2 | Bigger features | 14–20 | Close the main gaps with modern file managers | Not started |
-| 3 | Performance and resources | 21–23 | Stay fast and light with huge folders and libraries | 21 implemented on continuation branch; 22–23 remain |
-| 4 | Code health | 24–27 | Keep the codebase easy and safe to change | Implemented; merge/CI pending, main required check configured |
+| 3 | Performance and resources | 21–23 | Stay fast and light with huge folders and libraries | 21 implemented; 22–23 remain |
+| 4 | Code health | 24–27 | Keep the codebase easy and safe to change | Implemented; required main check configured |
 | 5 | Distribution and accessibility | 28–29 | Install cleanly and work for everyone | Not started |
 
 ---
@@ -134,14 +138,14 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
   - **Icon view:** add an overlay field on the tile in `FileIcons.swift`.
   - **Behavior:** the field starts with the name selected but not the extension; Esc cancels; validate with `DirectoryReader.validateName`.
 - **Done when:** You can rename in both views without a dialog. Invalid names show an inline error, and a sanity test covers it.
-- **Status (2026-11-07):** Implemented in both native file views. Return and completed slow second clicks edit the existing name field; basename selection, validation, Escape, case-only rename, scroll/reuse, refresh cancellation and real Undo are covered by interaction tests. The field now uses native cell accessibility; external accessibility recheck remains pending. Implemented on `codex/phase1-daily-use`; not merged yet.
+- **Status (2026-11-07):** Implemented in both native file views. Return and completed slow second clicks edit the existing name field; basename selection, validation, Escape, case-only rename, scroll/reuse, refresh cancellation and real Undo are covered by interaction tests. The field uses native cell accessibility and restores its static-text role after cancellation; CI covers the external hierarchy. Delivery through PR #2.
 
 ### 8. Editable path bar (⌘L) · S
 
 - **Goal:** Type or paste a path, including `~/…`, to jump there.
 - **Approach:** Pressing ⌘L or clicking an empty part of the breadcrumb (`folderPage` in `LibraryView.swift`) swaps it for a text field. Autocomplete folder names from the current directory, then Return navigates and Esc restores the breadcrumb.
 - **Done when:** ⌘L, typing `~/Downl` and Tab completes to Downloads, and Return opens it.
-- **Status (2026-11-07):** Implemented Command-L and breadcrumb-background editing with literal absolute/relative/tilde paths, folder-only Tab completion, validation and Escape. Fixture tests and a live release-app path-completion/navigation check passed. Implemented on `codex/phase1-daily-use`; not merged yet.
+- **Status (2026-11-07):** Implemented Command-L and breadcrumb-background editing with literal absolute/relative/tilde paths, folder-only Tab completion, validation and Escape. Fixture tests and a live release-app path-completion/navigation check passed. Delivery through PR #2.
 
 ### 9. Folder sizes and item counts · M
 
@@ -152,28 +156,28 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
   - **Load:** only visible rows request sizes.
 - **Done when:** Opening a folder fills in folder sizes within about 1 s for typical folders, scrolling stays smooth, and idle CPU stays at about 0% once sizes are done.
 - **Risk:** Deep trees and slow disks. Use utility priority and cancel when the user leaves the folder.
-- **Status (2026-11-07):** Implemented metadata-only cancellable bulk sizing for visible list rows, recursive counts, partial/capped labels, bounded utility workers/cache and descendant event invalidation. The release benchmark measured 5,050 entries in 3.57 ms initially and 2.32–2.77 ms thereafter with a warm filesystem cache. Cold disks, providers and idle CPU remain manual checks. Implemented on `codex/phase1-daily-use`; not merged yet.
+- **Status (2026-11-07):** Implemented metadata-only cancellable bulk sizing for visible list rows, recursive counts, partial/capped labels, bounded utility workers/cache and descendant event invalidation. The release benchmark measured 5,050 entries in 3.57 ms initially and 2.32–2.77 ms thereafter with a warm filesystem cache. Cold disks, providers and idle CPU remain manual checks. Delivery through PR #2.
 
 ### 10. Better Quick Look · M
 
 - **Goal:** Space opens a large preview you can step through with the arrow keys, with video and audio controls and a full-screen option.
 - **Approach:** Turn the preview pane (`LibraryDetails.swift`) into a resizable overlay mode. The arrow keys follow the current list or grid order, and it reuses `EmbeddedPDF` and `EmbeddedVideo`.
 - **Done when:** Space, the arrow keys and Esc work in folder and Library pages without moving the underlying selection unexpectedly.
-- **Status (2026-11-07):** Implemented a resizable in-window preview with media controls, fill-window mode, arrow navigation in originating display order, online-only skipping and restored focus on close. Underlying selection and file-operation isolation, Inspector metadata and text extraction have regression coverage. Live preview/arrow/fill/Escape checks passed. Implemented on `codex/phase1-daily-use`; not merged yet.
+- **Status (2026-11-07):** Implemented a resizable in-window preview with media controls, fill-window mode, arrow navigation in originating display order, online-only skipping and restored focus on close. Underlying selection and file-operation isolation, Inspector metadata and text extraction have regression coverage. Live preview/arrow/fill/Escape checks passed. Delivery through PR #2.
 
 ### 11. Remembered Free Up Space choices · S
 
 - **Goal:** Files you decided to keep stop reappearing.
 - **Approach:** Add "Ignore this file" and "Ignore files like this" (by extension or folder) to the right-click menu of each Free Up Space row. Store the ignore list in `LibrarySettings` (`LibraryModel.swift`) and filter `candidates(_:)` with it. Settings → Library lists the ignored items so they can be restored.
 - **Done when:** An ignored file disappears from every card and survives an app restart.
-- **Status (2026-11-07):** Implemented persisted exact-file, extension and enclosing-folder exclusions across candidate, duplicate and similar-photo cards, with Settings removal. Eligibility changes clear stale picks/reviews. Four real-fixture tests passed; a full context-menu/settings walkthrough remains manual. Implemented on `codex/phase1-daily-use`; not merged yet.
+- **Status (2026-11-07):** Implemented persisted exact-file, extension and enclosing-folder exclusions across candidate, duplicate and similar-photo cards, with Settings removal. Eligibility changes clear stale picks/reviews. Four real-fixture tests passed; a full context-menu/settings walkthrough remains manual. Delivery through PR #2.
 
 ### 12. Discoverable keyboard shortcuts · S
 
 - **Goal:** Shortcuts are visible where they matter.
 - **Approach:** Add shortcut hints to toolbar tooltips (`Theme.swift` → `ToolbarIconButton`) and to menu items. Add a cheat-sheet overlay on ⌘/ that is generated from the menu definitions in `MacExApp.buildMenu`.
 - **Done when:** ⌘/ shows every shortcut, and the list stays in sync automatically because it comes from the menus.
-- **Status (2026-11-07):** Implemented Command-/ help derived from the actual native menu, file-view gesture hints and matching toolbar help. Hidden/alternate menu entries are excluded. Menu-change regression and live help opening/dismissal passed. Implemented on `codex/phase1-daily-use`; not merged yet.
+- **Status (2026-11-07):** Implemented Command-/ help derived from the actual native menu, file-view gesture hints and matching toolbar help. Hidden/alternate menu entries are excluded. Menu-change regression and live help opening/dismissal passed. Delivery through PR #2.
 
 ### 13. First-launch onboarding and empty states · S
 
@@ -185,7 +189,7 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
   
   Every empty state (Home with no library, an empty folder, no search results) gets one clear next action.
 - **Done when:** A fresh profile shows onboarding once, and every empty state has a primary button.
-- **Status (2026-11-07):** Implemented three-step onboarding, explicit Done/Skip persistence, legacy-profile migration and actionable empty states. Isolated --state-directory workflow sessions suppress onboarding. Persistence/migration tests passed; a fresh-profile interactive walkthrough remains pending. Implemented on `codex/phase1-daily-use`; not merged yet.
+- **Status (2026-11-07):** Implemented three-step onboarding, explicit Done/Skip persistence, legacy-profile migration and actionable empty states. Isolated --state-directory workflow sessions suppress onboarding. Persistence/migration tests passed; a fresh-profile interactive walkthrough remains pending. Delivery through PR #2.
 
 ---
 
@@ -245,7 +249,7 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 - **Goal:** Zero work while MacEx is hidden, and less work on battery.
 - **Approach:** Pause library rescans and the `IndexEvents` watcher when the window is hidden or the app is in the background, and catch up once on return. On battery, lengthen the rescan debounce from 3 s to 30 s.
 - **Done when:** Activity Monitor shows 0% CPU and no wakeups while hidden, and one catch-up rescan runs on return.
-- **Status (2026-11-07):** Implemented coalesced activity-aware library/index refresh, native power notifications, suspended watchers/rule timers and foreground catch-up. Library/index delays are 3 seconds on AC and 30 seconds on battery; folder events retain 200 ms AC responsiveness and use 30 seconds on battery. Explicit transfers/playback continue. Eight focused regressions cover cancellation, rapid return, late callbacks, opt-in and Stop intent. Physical battery and idle CPU/wakeup measurement remain manual. Implemented on `codex/background-code-health`; not merged yet.
+- **Status (2026-11-07):** Implemented coalesced activity-aware library/index refresh, native power notifications, suspended watchers/rule timers and foreground catch-up. Library/index delays are 3 seconds on AC and 30 seconds on battery; folder events retain 200 ms AC responsiveness and use 30 seconds on battery. Explicit transfers/playback continue. Eight focused regressions cover cancellation, rapid return, late callbacks, opt-in and Stop intent. Physical battery and idle CPU/wakeup measurement remain manual. PR #3 merged into Phase 1; delivery to main through PR #2.
 
 ### 22. Right-sized thumbnails · S
 
@@ -268,21 +272,21 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 - **Goal:** No view file over about 400 lines.
 - **Approach:** Move each page (Home, Files, Folder, Duplicates, Connections) and the sidebar and toolbar into their own files under `Sources/MacEx/Pages/`. Behavior stays exactly the same.
 - **Done when:** The build and all tests pass, and the diff only moves code.
-- **Status (2026-11-07):** Extracted the 776-line library view into a 99-line shell and focused Pages extensions (largest 126 lines). Thumbnail and drag-event support are separate; SwiftUI state stays on the window shell and Xcode references are updated. Existing real-window interactions and page rendering pass. Implemented on `codex/background-code-health`; not merged yet.
+- **Status (2026-11-07):** Extracted the 776-line library view into a 99-line shell and focused Pages extensions (largest 126 lines). Thumbnail and drag-event support are separate; SwiftUI state stays on the window shell and Xcode references are updated. Existing real-window interactions and page rendering pass. PR #3 merged into Phase 1; delivery to main through PR #2.
 
 ### 25. Remove the private `_VariadicView` API · S
 
 - **Goal:** No dependence on underscored SwiftUI API.
 - **Approach:** Replace `SettingsGroup`'s separator layout (`LibrarySettingsView.swift`) with explicit separators passed by each section, or with `Group(subviews:)` behind `#available(macOS 15, *)` and a fallback for older systems.
 - **Done when:** `grep -r _VariadicView Sources` finds nothing.
-- **Status (2026-11-07):** Removed every `_VariadicView` reference. Public SwiftUI stacks, one-point separator gaps and row backgrounds provide the same implementation on macOS 14 and newer. Release and native host builds pass. Implemented on `codex/background-code-health`; not merged yet.
+- **Status (2026-11-07):** Removed every `_VariadicView` reference. Public SwiftUI stacks, one-point separator gaps and row backgrounds provide the same implementation on macOS 14 and newer. Release and native host builds pass. PR #3 merged into Phase 1; delivery to main through PR #2.
 
 ### 26. One path for side effects · S
 
 - **Goal:** Views never call `NSWorkspace` or `NSPasteboard` directly.
 - **Approach:** Route opening through `FileOpener` (already done), and pasteboard writes and "reveal in folder" through small services that can be swapped out in tests.
 - **Done when:** A grep shows these calls only inside the service types, and the tests cover copy-path and reveal.
-- **Status (2026-11-07):** Centralized opening, native icons, clipboard and workspace notifications in SystemFileServices.swift; reveal stays inside MacEx and selects the loaded file. Isolated clipboard and real-filesystem reveal tests pass, including filesystem aliases. Implemented on `codex/background-code-health`; not merged yet.
+- **Status (2026-11-07):** Centralized opening, native icons, clipboard and workspace notifications in SystemFileServices.swift; reveal stays inside MacEx and selects the loaded file. Isolated clipboard and real-filesystem reveal tests pass, including filesystem aliases. PR #3 merged into Phase 1; delivery to main through PR #2.
 
 ### 27. Continuous integration · S
 
@@ -316,19 +320,19 @@ The earlier Undo commit `0d1a794` passed its branch CI (run 42198641887). Its su
 ## Suggested order
 
 1. ~~Phase 0 (items 1–5), then merge.~~ Done 2026-11-06; only the manual checklist run is pending.
-2. Items 6, 7 and 9 are implemented (7 and 9 on the Phase 1 feature branch). Item 21 is now implemented on the continuation branch.
-3. Items 24–27 are implemented on the continuation branch; review/merge them before Phase 2.
+2. Items 6–13 and 21 are implemented; consolidated delivery is PR #2.
+3. Items 24–27 are implemented; continuation PR #3 is merged into Phase 1.
 4. Phase 2 in the order 15 → 14 → 16 → 17 → 18 → 19 → 20.
 5. Items 22–23 alongside, triggered by measured need.
 6. Phase 5 before the next public release.
 
 ## Tracking
 
-Each item becomes a GitHub issue titled `[Plan #N] <title>` and links back to this document. Ticks below track implemented work; the Progress table records whether it is merged. Phase 1 items 7–13 are implemented on the feature branch, with pending verification listed in the linked report. (No issues have been created yet; progress is tracked here.)
+Each item becomes a GitHub issue titled `[Plan #N] <title>` and links back to this document. Ticks below track implemented work; the Progress table links its integration record. Outstanding manual verification is listed in the linked reports. (No issues have been created yet; progress is tracked here.)
 
 - [x] 1 · [x] 2 · [x] 3 · [x] 4 (written; first run pending) · [x] 5
 - [x] 6 · [x] 7 · [x] 8 · [x] 9 · [x] 10 · [x] 11 · [x] 12 · [x] 13
 - [ ] 14 · [ ] 15 · [ ] 16 · [ ] 17 · [ ] 18 · [ ] 19 · [ ] 20
 - [x] 21 · [ ] 22 · [ ] 23
-- [x] 24 · [x] 25 · [x] 26 · [x] 27 (required check configured; workflow change pending merge)
+- [x] 24 · [x] 25 · [x] 26 · [x] 27 (required check configured)
 - [ ] 28 · [ ] 29

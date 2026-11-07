@@ -41,13 +41,13 @@ The packaged release app was exercised through native mouse/keyboard input again
 - Fill-window preview and Escape dismissal.
 - Command-/ shortcut help and Escape dismissal.
 
-No personal file was moved, renamed or trashed during these checks. The native accessibility check exposed an inline-editor issue after an initial attempted fix; the final fix edits the existing native cell field and passes focused tests. The final external accessibility recheck remains pending.
+No personal file was moved, renamed or trashed during these checks. The native accessibility check exposed an inline-editor issue after an initial attempted fix; the final fix edits the existing native cell field and passes focused tests. The merge follow-up additionally restores the static-text role explicitly after Escape; both native views have a failing-then-passing regression. External XCTest coverage runs in required CI.
 
 ## Validation limits
 
 - Xcode UI-test execution is pending: `/usr/bin/automationmodetool status` reports Automation Mode disabled and requires user authentication to enable it. The native test host and workflow tests are built locally; build success is not a UI-test pass.
 - The complete pre-release interaction checklist, fresh-profile onboarding walkthrough, cleanup exclusion context menus/settings walkthrough, media-format matrix, idle CPU measurement, physical/cloud volumes, Intel and macOS 14 runtime checks remain manual/platform verification.
-- Published in [draft PR #2](https://github.com/hgpt185/MacEx/pull/2), implementation commit `7a1f1ef`. CI and merge status are separate from implementation and local verification. Developer ID/notarization remains optional for GitHub previews under `ROADMAP.md`.
+- Published in [PR #2](https://github.com/hgpt185/MacEx/pull/2), implementation commit `7a1f1ef`. CI and merge status are separate from implementation and local verification. Developer ID/notarization remains optional for GitHub previews under `ROADMAP.md`.
 
 ## Review and fixes
 
@@ -62,4 +62,8 @@ Independent review identified keyboard leakage through the preview, inspector it
 - Final focused inline rename run: **7 tests passed** after switching to the existing native name field and removing the incompatible whole-table accessibility override.
 - `git diff --check`: clean.
 
-Logs are retained locally at `/private/tmp/macex-phase1-full-tests.log`, `/private/tmp/macex-phase1-offline.log`, `/private/tmp/macex-phase1-release-final.log`, `/private/tmp/macex-phase1-ui-build.log` and `/private/tmp/macex-phase1-rename.log`. These temporary logs are not repository artifacts. Native UI-test execution, fresh-profile/manual walkthroughs and the final external accessibility recheck remain pending; no public release or merge is claimed.
+Logs are retained locally at `/private/tmp/macex-phase1-full-tests.log`, `/private/tmp/macex-phase1-offline.log`, `/private/tmp/macex-phase1-release-final.log`, `/private/tmp/macex-phase1-ui-build.log` and `/private/tmp/macex-phase1-rename.log`. These temporary logs are not repository artifacts. Fresh-profile/manual walkthroughs remain pending. PR #2 is the consolidated delivery record to protected main; its required `macos` check records native UI execution and preview packaging. No public release is claimed.
+
+## Consolidated integration follow-up (2026-11-07)
+
+Continuation PR #3 merged into this branch at `fa6adb5`, adding items 21 and 24–27. Consolidated local coverage is 96 core + 73 app tests. CI follow-up fixes path attachment focus, label/value heading assertions and the unknown filename accessibility role after Escape. The role regression failed in both list/icon views before the explicit static-text restoration, then passed. PR #2 carries all changes to main under the required CI gate; historical results above remain the Phase 1 evidence.

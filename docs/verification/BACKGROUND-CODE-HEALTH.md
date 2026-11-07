@@ -1,6 +1,6 @@
 # Background activity and code-health verification
 
-Date: 2026-11-07. Baseline: `40a4e13` (Phase 1 PR #2). Branch: `codex/background-code-health`. Published as [draft PR #3](https://github.com/hgpt185/MacEx/pull/3), implementation commit `78d50ff`.
+Date: 2026-11-07. Baseline: `40a4e13` (Phase 1 PR #2). Branch: `codex/background-code-health`. Published as [PR #3](https://github.com/hgpt185/MacEx/pull/3), implementation commit `78d50ff`.
 
 ## Implemented work
 
@@ -21,7 +21,7 @@ Date: 2026-11-07. Baseline: `40a4e13` (Phase 1 PR #2). Branch: `codex/background
 
 ## Phase 1 CI follow-up
 
-Run 42343909326 passed services/offline checks and failed two native UI cases on macOS 15. Command-L's field could exist before its initial focus request succeeded; focus is now requested after actual window attachment, with a focused regression. The inline name field was reachable during editing, but its static-label query did not return after Escape; the temporary editing accessibility-role override is now cleared on cancellation and the native hierarchy is notified. These native fixes still require CI execution; a local build is not a native UI-test pass.
+Run 42343909326 exposed path-field focus before attachment and filename accessibility after Escape. Focus is now requested on actual window attachment. Run 42347513565 confirmed path navigation worked but its heading exposed a label rather than a value; native assertions now accept either representation. It also confirmed that clearing the editing role to nil produced an unknown filename element. Cancellation now restores the original read-only field as static text. A regression failed in both file views before this fix, then passed. PR #2's required `macos` check is the live native execution and packaging gate.
 
 ## Verification commands
 
@@ -39,7 +39,7 @@ Eight focused background tests passed after review fixes. Final integrated comma
 
 - Physical battery switching, sustained idle CPU/wakeup measurement, minimize/occlusion transitions, the complete release checklist and supported-platform runtime checks remain manual. Automated tests establish scan/watch suspension; no measurement of absolute zero process CPU is claimed.
 - Local Automation Mode remains disabled, so the Xcode UI suite is built locally and must execute in CI. The new hide/return workflow test and the two macOS 15 follow-up cases remain part of that gate.
-- This branch is stacked on Phase 1. Its pull request targets `codex/phase1-daily-use`; merge the continuation into Phase 1 before merging PR #2 into protected `main`. No merge or public release is performed by this task.
+- PR #3 was merged into Phase 1 at `fa6adb5` on 2026-11-07. Consolidated delivery to protected `main` is [PR #2](https://github.com/hgpt185/MacEx/pull/2). This work does not publish a public release or replace `/Applications/MacEx.app`.
 - Larger features (14–20), thumbnail optimization (22), huge-folder paging (23), optional signing (28) and the full accessibility pass (29) remain outside this work.
 
 ## Final results
@@ -52,4 +52,4 @@ Eight focused background tests passed after review fixes. Final integrated comma
 - Independent review: two concrete timing findings were reproduced and fixed; focused re-review found no remaining blocker in those fixes.
 - Required `main` protection: API read-back confirmed `macos`, GitHub Actions app ID 15368, strict mode and administrator enforcement.
 
-Native UI-test execution and physical/manual resource validation remain pending. Source and workflow changes are not merged into `main`.
+Physical/manual resource validation remains pending. Local native UI execution is unavailable; the required `macos` CI result on PR #2 records native execution and universal preview packaging.
